@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Huntly - Buscador de Vagas LinkedIn</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='styles.css') }}"
+    />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="container">
+        <a class="navbar-brand" href="#">Huntly</a>
+        <span class="navbar-subtitle"
+          >Buscador de Vagas e Publicações LinkedIn</span
+        >
+      </div>
+    </nav>
+
+    <div class="main-container">
+      <div class="tabs">
+        <button id="search-tab" class="tab-btn active" data-tab="search">
+          Buscar
+          
+        </button>
+        <button id="results-tab" class="tab-btn" data-tab="results">
+          Resultados
+          <span class="results-badge">0</span>
+        </button>
+      </div>
+
+      <div class="tab-content">
+        <div id="search-pane" class="tab-pane active">
+          <div class="search-section">
+            <form id="search-form">
+              <!-- Tipo de Busca -->
+              <div class="search-type-section">
+                <h3>Escolha o tipo de busca</h3>
+                <div class="search-type-buttons">
+                  <button
+                    type="button"
+                    class="search-type-btn active"
+                    data-type="jobs"
+                  >
+                    <i class="bi bi-briefcase"></i>
+                    Vagas
+                  </button>
+                  <button
+                    type="button"
+                    class="search-type-btn"
+                    data-type="publications"
+                  >
+                    <i class="bi bi-file-text"></i>
+                    Publicações
+                  </button>
+                </div>
+              </div>
+
+              <div class="search-inputs">
+                <div class="form-group">
+                  <label for="keywords" id="keywords-label"
+                    >Pesquisar por Vaga</label
+                  >
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="keywords"
+                    name="keywords"
+                    placeholder="Ex: estágio node.js, estágio react, estágio python..."
+                    required
+                  />
+                  <div class="keyword-suggestions" id="keyword-suggestions">
+                    <small
+                      >Sugestões: estágio, júnior, trainee, node.js, react,
+                      python, java, frontend, backend</small
+                    >
+                  </div>
+                </div>
+                <div class="form-group" id="location-group">
+                  <label for="location">Localização</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="location"
+                    name="location"
+                    placeholder="Ex: Brasil, São Paulo, Rio de Janeiro..."
+                  />
+                  <div class="location-suggestions">
+                    <small
+                      >Sugestões: Brasil, São Paulo, Rio de Janeiro, Belo
+                      Horizonte, Curitiba, Porto Alegre</small
+                    >
+                  </div>
+                </div>
+              </div>
+
+              <!-- Filtros específicos para publicações -->
+              <div
+                class="filters-section"
+                id="publication-filters"
+                style="display: none"
+              >
+                <h4>Filtros para Publicações</h4>
+                <div class="filters-grid">
+                  <div class="form-group">
+                    <label for="max_date">Período de Publicação</label>
+                    <select name="max_date" class="form-control" id="max_date">
+                      <option value="past-24-hours">Últimas 24 horas</option>
+                      <option value="past-3-days">Últimos 3 dias</option>
+                      <option value="past-week" selected>Última semana</option>
+                      <option value="past-month">Último mês</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="search-btn">
+                  <i class="bi bi-search"></i>
+                  <span id="search-btn-text">Buscar Vaga</span>
+                </button>
+                
+                <button
+                  type="button"
+                  class="btn btn-outline"
+                  id="test-btn"
+                  style="background: var(--warning-color); color: white"
+                >
+                  <i class="bi bi-bug"></i>
+                  Testar
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div id="status-section" class="status-section" style="display: none">
+            <div class="status-bar">
+              <div class="status-indicator">
+                <i class="bi bi-arrow-repeat"></i>
+                <span class="status-text">Buscando vagas...</span>
+              </div>
+              <div class="progress">
+                <div
+                  id="progress-bar"
+                  class="progress-bar"
+                  style="width: 0%"
+                ></div>
+              </div>
+              <button
+                id="stop-button"
+                class="btn btn-danger"
+                style="display: none"
+              >
+                <i class="bi bi-x-circle"></i>
+                Parar Busca
+              </button>
+            </div>
+          </div>
+
+          <div class="logs-section">
+            <div class="logs-header">
+              <h3>Logs de Busca</h3>
+              <button id="clear-logs" class="btn btn-text">
+                <i class="bi bi-trash"></i>
+                Limpar Logs
+              </button>
+            </div>
+            <div id="logs-container" class="logs-content">
+              <!-- Logs serão inseridos aqui -->
+            </div>
+          </div>
+        </div>
+
+        <div id="results-pane" class="tab-pane">
+          <div class="results-actions">
+            <div id="results-count" class="results-count">
+              <span id="results-count-text">0 vagas encontradas</span>
+            </div>
+            <!-- <div class="export-buttons">
+              <button class="btn btn-outline export-btn" data-format="csv">
+                <i class="bi bi-file-earmark-spreadsheet"></i>
+                Exportar CSV
+              </button>
+              <button class="btn btn-outline export-btn" data-format="json">
+                <i class="bi bi-file-earmark-code"></i>
+                Exportar JSON
+              </button>
+            </div> -->
+          </div>
+
+          <div id="results-grid" class="results-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+  </body>
+</html>
