@@ -1,4 +1,4 @@
-# Wavve - Buscador de Vagas LinkedIn
+# Huntly- Buscador de Vagas LinkedIn
 
 Um bot inteligente para buscar vagas de estágio e oportunidades em TI no LinkedIn, **focado especificamente em empresas do Brasil**.
 
