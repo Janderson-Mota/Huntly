@@ -27,14 +27,13 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
-5. venv\Scripts\activate 
 
-6. Execute a aplicação:
+5. Execute a aplicação:
 
 ```bash
 python app.py
 ```
-7. Acesse no navegador:
+6. Acesse no navegador:
 
 ```
 http://localhost:5000
