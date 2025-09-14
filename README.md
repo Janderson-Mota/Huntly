@@ -1,4 +1,4 @@
-# Wavve - Buscador de Vagas LinkedIn
+# Huntly- Buscador de Vagas LinkedIn
 
 Um bot inteligente para buscar vagas de estágio e oportunidades em TI no LinkedIn, **focado especificamente em empresas do Brasil**.
 
@@ -27,14 +27,13 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
-5. venv\Scripts\activate 
 
-6. Execute a aplicação:
+5. Execute a aplicação:
 
 ```bash
 python app.py
 ```
-7. Acesse no navegador:
+6. Acesse no navegador:
 
 ```
 http://localhost:5000
