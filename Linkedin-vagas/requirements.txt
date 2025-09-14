@@ -9,6 +9,3 @@ click==8.0.1
 MarkupSafe==2.0.1
 requests==2.32.3
 beautifulsoup4==4.12.3
-gunicorn==23.0.0
-packaging==25.0
-
