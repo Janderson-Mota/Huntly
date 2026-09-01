@@ -1,8 +1,8 @@
 # Huntly- Buscador de Vagas LinkedIn
 
-Um bot inteligente para buscar vagas de estágio e oportunidades em TI no LinkedIn, **focado especificamente em empresas do Brasil**.
+Um bot inteligente para buscar oportunidades em TI no LinkedIn, **focado especificamente em empresas do Brasil**.
 
-## 🛠️ Instalação
+##  Instalação
 
 1. Instalar PYTHON 3.8
 
