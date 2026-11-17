@@ -48,8 +48,39 @@
             <label for="keywords" id="keywords-label">Cargo ou Palavra-chave</label>
             <div class="input-with-icon">
               <i class="bi bi-search"></i>
-              <input type="text" class="form-control" id="keywords" name="keywords"
-                placeholder="Ex: Desenvolvedor Python, Estágio React, Dados..." required />
+              <input type="text" class="form-control" id="keywords" name="keywords" list="it-role-suggestions"
+                placeholder="Ex: Desenvolvedor Python, Engenheiro de Dados, DevOps..." required />
+              <datalist id="it-role-suggestions">
+                <option value="Desenvolvedor Full Stack"></option>
+                <option value="Desenvolvedor Back-end"></option>
+                <option value="Desenvolvedor Front-end"></option>
+                <option value="Desenvolvedor Mobile"></option>
+                <option value="Desenvolvedor Python"></option>
+                <option value="Desenvolvedor Java"></option>
+                <option value="Desenvolvedor Node.js"></option>
+                <option value="Desenvolvedor React"></option>
+                <option value="Desenvolvedor .NET"></option>
+                <option value="Engenheiro de Software"></option>
+                <option value="Engenheiro de Dados"></option>
+                <option value="Analista de Dados"></option>
+                <option value="Cientista de Dados"></option>
+                <option value="Engenheiro de Machine Learning"></option>
+                <option value="Engenheiro DevOps"></option>
+                <option value="Site Reliability Engineer (SRE)"></option>
+                <option value="Arquiteto de Software"></option>
+                <option value="Tech Lead"></option>
+                <option value="QA / Analista de Testes"></option>
+                <option value="Analista de Segurança da Informação"></option>
+                <option value="Cibersegurança"></option>
+                <option value="Administrador de Redes"></option>
+                <option value="Analista de Infraestrutura / Cloud"></option>
+                <option value="Suporte Técnico / Help Desk"></option>
+                <option value="Analista de Sistemas"></option>
+                <option value="UX/UI Designer"></option>
+                <option value="Product Manager"></option>
+                <option value="Scrum Master"></option>
+                <option value="Estágio em TI"></option>
+              </datalist>
             </div>
             <div class="chip-suggestions" id="recent-searches" style="display: none"></div>
           </div>
