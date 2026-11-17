@@ -206,37 +206,11 @@ document.addEventListener("DOMContentLoaded", () => {
       country: countrySelect.value,
       state: stateSelect.value,
       city: cityInput.value,
-      job_max_date: formData.get("job_max_date") || "r7d",
+      job_max_date: formData.get("job_max_date") || "",
       experience_level: formData.get("experience_level") || "",
       place: formData.get("place") || "",
       job_type: formData.get("job_type") || "",
-      distance: formData.get("distance") || "",
-      sort_by: formData.get("sort_by") || "DD",
-      easy_apply: formData.get("easy_apply") || "",
     });
-  }
-
-  function restoreSavedFilters() {
-    const saved = readStorage(STORAGE_KEYS.filters, null);
-    if (!saved) return;
-
-    if (saved.keywords) keywordsInput.value = saved.keywords;
-    if (saved.country !== undefined) {
-      countrySelect.value = saved.country;
-      populateStates(saved.country);
-    }
-    if (saved.state) {
-      stateSelect.value = saved.state;
-      populateCitySuggestions(countrySelect.value, saved.state);
-    }
-    if (saved.city) cityInput.value = saved.city;
-
-    ["job_max_date", "experience_level", "place", "job_type", "distance", "sort_by", "easy_apply"].forEach(
-      (field) => {
-        const el = document.getElementById(field);
-        if (el && saved[field] !== undefined) el.value = saved[field];
-      }
-    );
   }
 
   function initLocationCascade() {
@@ -358,12 +332,12 @@ document.addEventListener("DOMContentLoaded", () => {
       keywords: (formData.get("keywords") || "").trim(),
       location: buildLocationString(),
       max_date: formData.get("job_max_date") || "",
-      sort_by: formData.get("sort_by") || "",
-      distance: formData.get("distance") || "",
+      sort_by: "",
+      distance: "",
       job_type: jobType ? [jobType] : [],
       place: place ? [place] : [],
       experience_level: expLevel ? [expLevel] : [],
-      easy_apply: formData.get("easy_apply") === "true",
+      easy_apply: false,
       limit_jobs: 100,
     };
   }
