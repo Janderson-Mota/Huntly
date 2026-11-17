@@ -5,7 +5,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const resetFiltersBtn = document.getElementById("reset-filters-btn");
 
   const keywordsInput = document.getElementById("keywords");
-  const recentSearchesEl = document.getElementById("recent-searches");
   const countrySelect = document.getElementById("country");
   const stateSelect = document.getElementById("state");
   const cityInput = document.getElementById("city");
@@ -166,7 +165,6 @@ document.addEventListener("DOMContentLoaded", () => {
       stateSelect.options[0].textContent = countrySelect.value ? t("allStates") : t("selectCountryFirst");
     }
 
-    renderRecentKeywords();
     renderFilteredResults();
   }
 
@@ -214,43 +212,6 @@ document.addEventListener("DOMContentLoaded", () => {
         kickerRow.appendChild(badge);
       }
     }
-  }
-
-  function saveRecentKeyword(keyword) {
-    const clean = keyword.trim();
-    if (!clean) return;
-    const current = readStorage(STORAGE_KEYS.recentKeywords, []).filter(
-      (item) => item.toLowerCase() !== clean.toLowerCase()
-    );
-    const updated = [clean, ...current].slice(0, 5);
-    writeStorage(STORAGE_KEYS.recentKeywords, updated);
-    renderRecentKeywords();
-  }
-
-  function renderRecentKeywords() {
-    const recent = readStorage(STORAGE_KEYS.recentKeywords, []);
-    recentSearchesEl.innerHTML = "";
-    if (!recent.length) {
-      recentSearchesEl.style.display = "none";
-      return;
-    }
-    recentSearchesEl.style.display = "flex";
-    const label = document.createElement("span");
-    label.className = "chip-label";
-    label.textContent = t("recentLabel");
-    recentSearchesEl.appendChild(label);
-
-    recent.forEach((kw) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "suggestion-chip";
-      btn.textContent = kw;
-      btn.addEventListener("click", () => {
-        keywordsInput.value = kw;
-        keywordsInput.focus();
-      });
-      recentSearchesEl.appendChild(btn);
-    });
   }
 
   function saveCurrentFilters() {
@@ -419,7 +380,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     showFeedback("");
     saveCurrentFilters();
-    saveRecentKeyword(searchData.keywords);
 
     try {
       setSearching(true);
@@ -682,7 +642,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const detailsBtn = document.createElement("button");
     detailsBtn.type = "button";
-    detailsBtn.className = "card-action-link";
+    detailsBtn.className = "btn btn-outline btn-sm";
     detailsBtn.textContent = t("btnDetails");
     detailsBtn.addEventListener("click", () => {
       markJobAsSeen(job.id, card);
@@ -690,7 +650,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const openLink = document.createElement("a");
-    openLink.className = "card-action-link";
+    openLink.className = "btn btn-primary btn-sm";
     openLink.href = safeLink;
     openLink.target = "_blank";
     openLink.rel = "noopener noreferrer";

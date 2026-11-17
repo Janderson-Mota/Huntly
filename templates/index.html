@@ -42,16 +42,6 @@
   </header>
 
   <main class="main-container">
-    <!-- Hero Compacto -->
-    <section class="hero-section">
-      <h1 class="hero-title">
-        <span data-i18n="heroTitleStart">busca inteligente </span><span class="hero-accent" data-i18n="heroTitleAccent">de vagas.</span>
-      </h1>
-      <p class="hero-subtitle" data-i18n="heroSubtitle">
-        Filtre por país, estado, cidade, nível e modalidade — e abra cada oportunidade diretamente no LinkedIn.
-      </p>
-    </section>
-
     <!-- Painel de Filtros -->
     <section id="filtros" class="filters-panel" aria-label="Filtros de Busca">
       <form id="search-form">
@@ -96,7 +86,6 @@
                 <option value="Estágio em TI"></option>
               </datalist>
             </div>
-            <div class="chip-suggestions" id="recent-searches" style="display: none"></div>
           </div>
 
           <div class="location-cascade" id="location-group">
@@ -171,11 +160,6 @@
 
         <!-- Ações Principais -->
         <div class="form-actions">
-          <button type="submit" class="btn btn-primary" id="search-btn">
-            <span id="search-btn-text" data-i18n="btnSearch">Buscar Vagas</span>
-            <i class="bi bi-arrow-right"></i>
-          </button>
-
           <button type="button" class="btn btn-outline" id="reset-filters-btn">
             <i class="bi bi-arrow-counterclockwise"></i>
             <span data-i18n="btnReset">limpar filtros</span>
@@ -184,6 +168,11 @@
           <button type="button" class="btn btn-danger" id="stop-button" style="display: none">
             <i class="bi bi-stop-circle"></i>
             <span data-i18n="btnStop">Parar Busca</span>
+          </button>
+
+          <button type="submit" class="btn btn-primary" id="search-btn">
+            <span id="search-btn-text" data-i18n="btnSearch">Buscar Vagas</span>
+            <i class="bi bi-arrow-right"></i>
           </button>
         </div>
       </form>
