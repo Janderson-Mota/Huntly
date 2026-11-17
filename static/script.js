@@ -336,7 +336,7 @@ document.addEventListener("DOMContentLoaded", () => {
       distance: "",
       job_type: jobType ? [jobType] : [],
       place: place ? [place] : [],
-      experience_level: expLevel ? [expLevel] : [],
+      experience_level: expLevel ? expLevel.split(",") : [],
       easy_apply: false,
       limit_jobs: 100,
     };
