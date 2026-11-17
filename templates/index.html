@@ -80,9 +80,10 @@
             <div class="form-group">
               <label for="job_max_date">Data de publicação</label>
               <select name="job_max_date" class="form-control" id="job_max_date">
+                <option value="" selected>Qualquer data</option>
                 <option value="r24h">Últimas 24 horas</option>
                 <option value="r3d">Últimos 3 dias</option>
-                <option value="r7d" selected>Última semana</option>
+                <option value="r7d">Última semana</option>
                 <option value="r1m">Último mês</option>
               </select>
             </div>
@@ -135,7 +136,8 @@
             <div class="form-group">
               <label for="sort_by">Ordenar por</label>
               <select name="sort_by" class="form-control" id="sort_by">
-                <option value="DD" selected>Mais recentes</option>
+                <option value="" selected>Padrão (LinkedIn)</option>
+                <option value="DD">Mais recentes</option>
                 <option value="R">Mais relevantes</option>
               </select>
             </div>

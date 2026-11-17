@@ -51,13 +51,13 @@ def start_search():
         args = (
             params.get("keywords", ""),
             params.get("location", ""),
-            params.get("max_date", "r7d"),
+            params.get("max_date", ""),
             params.get("distance", ""),
             params.get("job_type", []),
             params.get("place", []),
             limit_jobs,
             params.get("experience_level", []),
-            params.get("sort_by", "DD"),
+            params.get("sort_by", ""),
             bool(params.get("easy_apply", False)),
         )
 

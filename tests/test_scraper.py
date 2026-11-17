@@ -10,8 +10,23 @@ def test_calculate_time_range():
     assert calculate_time_range("r7d") == "r604800"
     assert calculate_time_range("r1m") == "r2592000"
     assert calculate_time_range("past-24-hours") == "r86400"
-    assert calculate_time_range("invalid") == "r604800"
-    assert calculate_time_range("") == "r604800"
+    assert calculate_time_range("invalid") == ""
+    assert calculate_time_range("") == ""
+
+
+def test_build_params_neutral_keyword_only():
+    qs = build_params(
+        keywords="python",
+        location="",
+        time_range="",
+        distance="",
+        job_type=[],
+        place=[],
+    )
+    assert "keywords=python" in qs
+    assert "f_TPR" not in qs
+    assert "sortBy" not in qs
+    assert "location=" not in qs
 
 
 def test_build_params_encodes_properly():

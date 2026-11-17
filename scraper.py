@@ -34,7 +34,7 @@ jobs_state = SearchState(total_key="total_jobs", collected_key="collected_jobs")
 def calculate_time_range(max_date: Optional[str]) -> str:
     """Convert relative, LinkedIn, or YYYY-MM-DD date strings to LinkedIn f_TPR format."""
     if not max_date:
-        return "r604800"
+        return ""
 
     valid_relative = {
         "r24h": "r86400",
@@ -62,7 +62,7 @@ def calculate_time_range(max_date: Optional[str]) -> str:
     except ValueError:
         pass
 
-    return "r604800"
+    return ""
 
 
 def build_params(
@@ -74,24 +74,24 @@ def build_params(
     place: List[str],
     start: int = 0,
     experience_level: Optional[List[str]] = None,
-    sort_by: str = "DD",
+    sort_by: str = "",
     easy_apply: bool = False,
 ) -> str:
     """Build properly URL-encoded query string for LinkedIn job search."""
-    valid_sort = sort_by if sort_by in ("DD", "R") else "DD"
     params: List[tuple[str, str]] = [
-        ("f_TPR", time_range),
         ("position", "1"),
         ("pageNum", "0"),
         ("start", str(start)),
-        ("sortBy", valid_sort),
     ]
 
+    if time_range:
+        params.append(("f_TPR", time_range))
+    if sort_by in ("DD", "R"):
+        params.append(("sortBy", sort_by))
+
     if keywords:
-        cleaned = keywords.strip().replace('"', "")
+        cleaned = keywords.strip()
         cleaned = cleaned.replace("jr", "junior").replace("Jr", "Junior")
-        if " " in cleaned:
-            cleaned = f'"{cleaned}"'
         params.append(("keywords", cleaned))
 
     if location:

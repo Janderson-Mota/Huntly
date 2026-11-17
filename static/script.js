@@ -241,19 +241,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function initLocationCascade() {
     countrySelect.innerHTML = "";
+    const worldwideOpt = document.createElement("option");
+    worldwideOpt.value = "";
+    worldwideOpt.textContent = "Todos os países";
+    countrySelect.appendChild(worldwideOpt);
+
     Object.keys(LOCATION_DATA).forEach((country) => {
       const opt = document.createElement("option");
       opt.value = country;
       opt.textContent = country;
       countrySelect.appendChild(opt);
     });
-    const worldwideOpt = document.createElement("option");
-    worldwideOpt.value = "";
-    worldwideOpt.textContent = "Qualquer país (Mundial)";
-    countrySelect.appendChild(worldwideOpt);
 
-    countrySelect.value = "Brasil";
-    populateStates("Brasil");
+    countrySelect.value = "";
+    populateStates("");
   }
 
   function populateStates(country) {
@@ -327,7 +328,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   initLocationCascade();
-  restoreSavedFilters();
   renderRecentKeywords();
 
   function showFeedback(message) {
@@ -357,8 +357,8 @@ document.addEventListener("DOMContentLoaded", () => {
       type: "jobs",
       keywords: (formData.get("keywords") || "").trim(),
       location: buildLocationString(),
-      max_date: formData.get("job_max_date") || "r7d",
-      sort_by: formData.get("sort_by") || "DD",
+      max_date: formData.get("job_max_date") || "",
+      sort_by: formData.get("sort_by") || "",
       distance: formData.get("distance") || "",
       job_type: jobType ? [jobType] : [],
       place: place ? [place] : [],
