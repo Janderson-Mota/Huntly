@@ -160,7 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     if (countrySelect && countrySelect.options.length > 0) {
-      countrySelect.options[0].textContent = t("allCountries");
+      countrySelect.options[0].textContent = `🌐 ${t("allCountries")}`;
     }
     if (stateSelect && stateSelect.options.length > 0) {
       stateSelect.options[0].textContent = countrySelect.value ? t("allStates") : t("selectCountryFirst");
@@ -267,17 +267,29 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  const COUNTRY_FLAGS = {
+    Brasil: "🇧🇷",
+    Portugal: "🇵🇹",
+    "United States": "🇺🇸",
+    Canada: "🇨🇦",
+    "United Kingdom": "🇬🇧",
+    Germany: "🇩🇪",
+    Spain: "🇪🇸",
+    Ireland: "🇮🇪",
+  };
+
   function initLocationCascade() {
     countrySelect.innerHTML = "";
     const worldwideOpt = document.createElement("option");
     worldwideOpt.value = "";
-    worldwideOpt.textContent = t("allCountries");
+    worldwideOpt.textContent = `🌐 ${t("allCountries")}`;
     countrySelect.appendChild(worldwideOpt);
 
     Object.keys(LOCATION_DATA).forEach((country) => {
       const opt = document.createElement("option");
       opt.value = country;
-      opt.textContent = country;
+      const flag = COUNTRY_FLAGS[country] || "🏳️";
+      opt.textContent = `${flag} ${country}`;
       countrySelect.appendChild(opt);
     });
 
