@@ -111,12 +111,24 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const langSelect = document.getElementById("lang-select");
+  const themeToggleBtn = document.getElementById("theme-toggle-btn");
+  const themeIcon = document.getElementById("theme-icon");
   const STORAGE_KEYS = {
     filters: "huntly_last_filters",
     recentKeywords: "huntly_recent_keywords",
     seenJobs: "huntly_seen_jobs",
     lang: "huntly_lang",
+    theme: "huntly_theme",
   };
+
+  function applyTheme(theme) {
+    const isDark = theme === "dark";
+    document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+    writeStorage(STORAGE_KEYS.theme, isDark ? "dark" : "light");
+    if (themeIcon) {
+      themeIcon.className = isDark ? "bi bi-sun" : "bi bi-moon";
+    }
+  }
 
   const I18N = window.HUNTLY_I18N || {};
   let currentLang = readStorage(STORAGE_KEYS.lang, "pt");
@@ -346,7 +358,14 @@ document.addEventListener("DOMContentLoaded", () => {
   if (langSelect) {
     langSelect.addEventListener("change", (e) => applyLanguage(e.target.value));
   }
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      applyTheme(current === "dark" ? "light" : "dark");
+    });
+  }
 
+  applyTheme(readStorage(STORAGE_KEYS.theme, "light"));
   initLocationCascade();
   applyLanguage(currentLang);
 

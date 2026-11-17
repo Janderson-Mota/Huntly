@@ -18,6 +18,20 @@
   --transition: all 0.18s ease;
 }
 
+[data-theme="dark"] {
+  --bg-page: #111210;
+  --bg-surface: #191b18;
+  --bg-subtle: #232621;
+  --text-primary: #f2f1ec;
+  --text-secondary: #a8a69d;
+  --text-muted: #78766e;
+  --accent-green: #2d8a57;
+  --accent-green-hover: #236e45;
+  --border-light: #2c2f2a;
+  --border-dark: #4b4f47;
+  --error-color: #f87171;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -107,6 +121,24 @@ body {
 
 .lang-select:focus {
   outline: none;
+  background-color: var(--bg-subtle);
+}
+
+.theme-toggle-btn {
+  border: 1px solid var(--border-dark);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.theme-toggle-btn:hover {
   background-color: var(--bg-subtle);
 }
 
@@ -399,7 +431,7 @@ body {
 .feedback-banner {
   padding: 0.7rem 0.95rem;
   border: 1px solid var(--error-color);
-  background-color: #fef2f2;
+  background-color: rgba(185, 28, 28, 0.08);
   color: var(--error-color);
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -510,7 +542,7 @@ body {
 }
 
 .result-card.is-seen {
-  background-color: #fbfaf7;
+  background-color: var(--bg-subtle);
 }
 
 .card-kicker-row {
