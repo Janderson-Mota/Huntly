@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>huntly — buscador de vagas linkedin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+</head>
+
+<body>
+  <header class="navbar">
+    <div class="navbar-inner">
+      <a class="navbar-brand" href="#">huntly.</a>
+      <nav class="navbar-links">
+        <a href="#filtros" class="nav-link">filtros</a>
+        <a href="#resultados" class="nav-link">resultados</a>
+        <span class="results-pill" id="navbar-results-pill">
+          <span id="navbar-results-count">0 resultados</span>
+        </span>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main-container">
+    <!-- Hero Editorial Compacto -->
+    <section class="hero-section">
+      <h1 class="hero-title">
+        busca inteligente<br />
+        <span class="hero-accent">de oportunidades.</span>
+      </h1>
+      <p class="hero-subtitle">
+        Filtre vagas por país, estado, cidade, nível e modalidade — e abra cada oportunidade diretamente no LinkedIn.
+      </p>
+    </section>
+
+    <!-- Painel de Filtros -->
+    <section class="filters-panel" aria-label="Filtros de Busca">
+      <form id="search-form">
+        <!-- Campos Principais -->
+        <div class="primary-inputs-grid">
+          <div class="form-group">
+            <label for="keywords" id="keywords-label">Cargo ou Palavra-chave</label>
+            <div class="input-with-icon">
+              <i class="bi bi-search"></i>
+              <input type="text" class="form-control" id="keywords" name="keywords"
+                placeholder="Ex: Desenvolvedor Python, Estágio React..." required />
+            </div>
+            <div class="chip-suggestions" id="keyword-chips">
+              <button type="button" class="suggestion-chip" data-target="keywords" data-value="estágio">estágio</button>
+              <button type="button" class="suggestion-chip" data-target="keywords" data-value="júnior">júnior</button>
+              <button type="button" class="suggestion-chip" data-target="keywords" data-value="python">python</button>
+              <button type="button" class="suggestion-chip" data-target="keywords" data-value="react">react</button>
+              <button type="button" class="suggestion-chip" data-target="keywords" data-value="node.js">node.js</button>
+              <button type="button" class="suggestion-chip" data-target="keywords" data-value="devops">devops</button>
+            </div>
+          </div>
+
+          <div class="location-cascade" id="location-group">
+            <div class="location-selects-grid">
+              <div class="form-group">
+                <label for="country">País</label>
+                <select id="country" name="country" class="form-control"></select>
+              </div>
+              <div class="form-group">
+                <label for="state">Estado / Região</label>
+                <select id="state" name="state" class="form-control"></select>
+              </div>
+              <div class="form-group">
+                <label for="city">Cidade (opcional)</label>
+                <input type="text" class="form-control" id="city" name="city" list="city-suggestions"
+                  placeholder="Ex: Belo Horizonte" />
+                <datalist id="city-suggestions"></datalist>
+              </div>
+            </div>
+            <div class="location-preview">
+              <i class="bi bi-geo-alt"></i>
+              <span id="location-preview-text">Brasil</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filtros Avançados de Vagas -->
+        <div id="job-filters" class="advanced-filters">
+          <div class="filters-grid">
+            <div class="form-group">
+              <label for="job_max_date">Data de publicação</label>
+              <select name="job_max_date" class="form-control" id="job_max_date">
+                <option value="r24h">Últimas 24 horas</option>
+                <option value="r3d">Últimos 3 dias</option>
+                <option value="r7d" selected>Última semana</option>
+                <option value="r1m">Último mês</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="experience_level">Nível de experiência</label>
+              <select name="experience_level" class="form-control" id="experience_level">
+                <option value="" selected>Todos os níveis</option>
+                <option value="1">Estágio</option>
+                <option value="2">Júnior / Assistente</option>
+                <option value="3">Pleno / Associado</option>
+                <option value="4">Pleno-Sênior</option>
+                <option value="5">Diretor</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="place">Modalidade de trabalho</label>
+              <select name="place" class="form-control" id="place">
+                <option value="" selected>Todas as modalidades</option>
+                <option value="2">Remoto</option>
+                <option value="3">Híbrido</option>
+                <option value="1">Presencial</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="job_type">Tipo de contrato</label>
+              <select name="job_type" class="form-control" id="job_type">
+                <option value="" selected>Todos os tipos</option>
+                <option value="F">Tempo Integral</option>
+                <option value="P">Meio Período</option>
+                <option value="I">Estágio</option>
+                <option value="C">Contrato</option>
+                <option value="T">Temporário</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="distance">Distância máxima</label>
+              <select name="distance" class="form-control" id="distance">
+                <option value="" selected>Qualquer distância</option>
+                <option value="10">Até 10 km</option>
+                <option value="25">Até 25 km</option>
+                <option value="50">Até 50 km</option>
+                <option value="100">Até 100 km</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="sort_by">Ordenar por</label>
+              <select name="sort_by" class="form-control" id="sort_by">
+                <option value="DD" selected>Mais recentes</option>
+                <option value="R">Mais relevantes</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="easy_apply">Candidatura</label>
+              <select name="easy_apply" class="form-control" id="easy_apply">
+                <option value="" selected>Todas as vagas</option>
+                <option value="true">Candidatura Simplificada</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ações Principais -->
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="search-btn">
+            <span id="search-btn-text">Buscar Vagas</span>
+          </button>
+
+          <button type="button" class="btn btn-secondary" id="reset-filters-btn">
+            <i class="bi bi-arrow-counterclockwise"></i>
+            limpar filtros
+          </button>
+
+          <button type="button" class="btn btn-danger" id="stop-button" style="display: none">
+            <i class="bi bi-stop-circle"></i>
+            Parar Busca
+          </button>
+        </div>
+      </form>
+
+      <!-- Barra de Progresso -->
+      <div id="status-section" class="status-section" style="display: none">
+        <div class="status-meta">
+          <span class="status-indicator">
+            <i class="bi bi-arrow-repeat spin" id="status-spinner"></i>
+            <span class="status-text">Preparando busca...</span>
+          </span>
+          <span class="status-percent" id="status-percent">0%</span>
+        </div>
+        <div class="progress">
+          <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Logs Colapsáveis -->
+      <details class="logs-details" id="logs-details">
+        <summary class="logs-summary">
+          <span><i class="bi bi-terminal"></i> logs de execução</span>
+          <button type="button" id="clear-logs" class="btn btn-ghost btn-xs">
+            limpar
+          </button>
+        </summary>
+        <div id="logs-container" class="logs-content"></div>
+      </details>
+    </section>
+
+    <!-- Seção de Resultados em Cards abaixo dos filtros -->
+    <section class="results-section" aria-label="Resultados da Busca">
+      <div class="results-toolbar">
+        <div class="quick-filter-box">
+          <i class="bi bi-funnel"></i>
+          <input type="text" id="quick-filter-input" class="form-control form-control-sm"
+            placeholder="Filtrar cards por título, empresa ou cidade..." />
+        </div>
+
+        <div class="export-buttons">
+          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="csv">
+            exportar csv ↗
+          </button>
+          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="json">
+            exportar json ↗
+          </button>
+        </div>
+      </div>
+
+      <div id="empty-state" class="empty-state">
+        <h3>Nenhuma busca realizada ainda</h3>
+        <p>Configure os filtros acima e clique em <strong>Buscar Vagas</strong> para exibir os cards aqui.</p>
+      </div>
+
+      <div id="results-grid" class="results-grid"></div>
+      <nav id="pagination-bar" class="pagination-bar" style="display: none" aria-label="Paginação de resultados"></nav>
+    </section>
+  </main>
+
+  <!-- Modal de Detalhes da Vaga -->
+  <div id="job-modal" class="modal-backdrop" style="display: none" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <h3 id="modal-title">Título da Vaga</h3>
+          <p id="modal-company" class="modal-subtitle"></p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="close-modal-btn" aria-label="Fechar">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div id="modal-badges" class="modal-badges"></div>
+      <div id="modal-description" class="modal-body"></div>
+      <div class="modal-footer">
+        <a id="modal-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+          abrir vaga no linkedin ↗
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
