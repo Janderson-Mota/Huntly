@@ -93,6 +93,23 @@ body {
   background-color: var(--bg-surface);
 }
 
+.lang-select {
+  border: 1px solid var(--border-dark);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.lang-select:focus {
+  outline: none;
+  background-color: var(--bg-subtle);
+}
+
 /* Main Container */
 .main-container {
   max-width: 1200px;

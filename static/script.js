@@ -110,11 +110,53 @@ document.addEventListener("DOMContentLoaded", () => {
     },
   };
 
+  const langSelect = document.getElementById("lang-select");
   const STORAGE_KEYS = {
     filters: "huntly_last_filters",
     recentKeywords: "huntly_recent_keywords",
     seenJobs: "huntly_seen_jobs",
+    lang: "huntly_lang",
   };
+
+  const I18N = window.HUNTLY_I18N || {};
+  let currentLang = readStorage(STORAGE_KEYS.lang, "pt");
+  if (!I18N[currentLang]) currentLang = "pt";
+
+  function t(key, vars = {}) {
+    const dict = I18N[currentLang] || I18N.pt || {};
+    let str = dict[key] || (I18N.pt && I18N.pt[key]) || key;
+    Object.entries(vars).forEach(([k, v]) => {
+      str = str.replaceAll(`{${k}}`, String(v));
+    });
+    return str;
+  }
+
+  function applyLanguage(lang) {
+    if (!I18N[lang]) return;
+    currentLang = lang;
+    writeStorage(STORAGE_KEYS.lang, lang);
+    document.documentElement.lang = lang === "pt" ? "pt-BR" : lang;
+    document.title = t("pageTitle");
+
+    if (langSelect) langSelect.value = lang;
+
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      el.textContent = t(el.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+      el.placeholder = t(el.dataset.i18nPlaceholder);
+    });
+
+    if (countrySelect && countrySelect.options.length > 0) {
+      countrySelect.options[0].textContent = t("allCountries");
+    }
+    if (stateSelect && stateSelect.options.length > 0) {
+      stateSelect.options[0].textContent = countrySelect.value ? t("allStates") : t("selectCountryFirst");
+    }
+
+    renderRecentKeywords();
+    renderFilteredResults();
+  }
 
   const ITEMS_PER_PAGE = 9;
   let isSearching = false;
@@ -156,7 +198,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (kickerRow && !kickerRow.querySelector(".seen-badge")) {
         const badge = document.createElement("span");
         badge.className = "seen-badge";
-        badge.textContent = "vista ✓";
+        badge.textContent = t("seenBadge");
         kickerRow.appendChild(badge);
       }
     }
@@ -183,7 +225,7 @@ document.addEventListener("DOMContentLoaded", () => {
     recentSearchesEl.style.display = "flex";
     const label = document.createElement("span");
     label.className = "chip-label";
-    label.textContent = "Recentes:";
+    label.textContent = t("recentLabel");
     recentSearchesEl.appendChild(label);
 
     recent.forEach((kw) => {
@@ -217,7 +259,7 @@ document.addEventListener("DOMContentLoaded", () => {
     countrySelect.innerHTML = "";
     const worldwideOpt = document.createElement("option");
     worldwideOpt.value = "";
-    worldwideOpt.textContent = "Todos os países";
+    worldwideOpt.textContent = t("allCountries");
     countrySelect.appendChild(worldwideOpt);
 
     Object.keys(LOCATION_DATA).forEach((country) => {
@@ -235,7 +277,7 @@ document.addEventListener("DOMContentLoaded", () => {
     stateSelect.innerHTML = "";
     const allStatesOpt = document.createElement("option");
     allStatesOpt.value = "";
-    allStatesOpt.textContent = country ? "Todos os estados" : "Selecione um país";
+    allStatesOpt.textContent = country ? t("allStates") : t("selectCountryFirst");
     stateSelect.appendChild(allStatesOpt);
 
     const statesMap = LOCATION_DATA[country];
@@ -301,8 +343,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Escape" && jobModal.style.display !== "none") closeModal();
   });
 
+  if (langSelect) {
+    langSelect.addEventListener("change", (e) => applyLanguage(e.target.value));
+  }
+
   initLocationCascade();
-  renderRecentKeywords();
+  applyLanguage(currentLang);
 
   function showFeedback(message) {
     if (!message) {
@@ -348,7 +394,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const searchData = getFormData();
     if (!searchData.keywords) {
-      showFeedback("Informe um cargo ou palavra-chave para iniciar a busca.");
+      showFeedback(t("errNoKeyword"));
       return;
     }
 
@@ -366,12 +412,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.error || "Falha ao iniciar busca");
+        throw new Error(payload.error || t("errGeneric"));
       }
 
       pollResults();
     } catch (error) {
-      showFeedback(`Erro: ${error.message}`);
+      showFeedback(`${t("errPrefix")}${error.message}`);
       setIdleState();
     }
   }
@@ -380,7 +426,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await fetch("/status?type=jobs");
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Falha ao consultar status");
+      if (!response.ok) throw new Error(data.error || t("errGeneric"));
 
       updateStatusBar(data);
       await fetchResults();
@@ -388,7 +434,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.status === "complete" || data.progress === 100) {
         setIdleState();
       } else if (data.status === "error") {
-        showFeedback(data.status_message || "Ocorreu um erro durante a busca.");
+        showFeedback(data.status_message || t("errGeneric"));
         setIdleState();
       } else if (data.status === "stopped" || !data.is_searching) {
         setIdleState();
@@ -396,7 +442,7 @@ document.addEventListener("DOMContentLoaded", () => {
         pollTimeout = setTimeout(pollResults, 900);
       }
     } catch (error) {
-      showFeedback(`Erro de comunicação: ${error.message}`);
+      showFeedback(`${t("errComm")}${error.message}`);
       setIdleState();
     }
   }
@@ -436,14 +482,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const h3 = emptyState.querySelector("h3");
       const p = emptyState.querySelector("p");
       if (hasResults && term) {
-        h3.textContent = "Nenhum card corresponde ao filtro rápido";
-        p.textContent = `Tente limpar o filtro "${quickFilterInput.value}" para ver todas as ${searchResults.length} vagas.`;
+        h3.textContent = t("emptyNoMatchTitle");
+        p.textContent = t("emptyNoMatchDesc", { term: quickFilterInput.value, total: searchResults.length });
       } else if (isSearching) {
-        h3.textContent = "Coletando vagas...";
-        p.textContent = "Os cards aparecerão aqui conforme forem encontrados.";
+        h3.textContent = t("emptyCollectingTitle");
+        p.textContent = t("emptyCollectingDesc");
+      } else if (searchResults.length === 0 && !quickFilterInput.value) {
+        h3.textContent = t("emptyInitialTitle");
+        p.textContent = t("emptyInitialDesc");
       } else {
-        h3.textContent = "Nenhuma vaga para exibir";
-        p.textContent = "Configure os filtros acima e clique em Buscar Vagas.";
+        h3.textContent = t("emptyNoneTitle");
+        p.textContent = t("emptyNoneDesc");
       }
       return;
     }
@@ -478,7 +527,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const info = document.createElement("span");
     info.className = "pagination-info";
-    info.textContent = `Mostrando ${startItem}–${endItem} de ${totalItems} vagas (página ${currentPage} de ${totalPages})`;
+    info.textContent = t("pageInfo", {
+      start: startItem,
+      end: endItem,
+      total: totalItems,
+      page: currentPage,
+      pages: totalPages,
+    });
 
     const controls = document.createElement("div");
     controls.className = "pagination-controls";
@@ -493,7 +548,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const prevBtn = document.createElement("button");
     prevBtn.type = "button";
     prevBtn.className = "pagination-btn";
-    prevBtn.textContent = "← anterior";
+    prevBtn.textContent = t("pagePrev");
     prevBtn.disabled = currentPage === 1;
     prevBtn.addEventListener("click", () => goToPage(currentPage - 1));
     controls.appendChild(prevBtn);
@@ -521,7 +576,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const nextBtn = document.createElement("button");
     nextBtn.type = "button";
     nextBtn.className = "pagination-btn";
-    nextBtn.textContent = "próxima →";
+    nextBtn.textContent = t("pageNext");
     nextBtn.disabled = currentPage === totalPages;
     nextBtn.addEventListener("click", () => goToPage(currentPage + 1));
     controls.appendChild(nextBtn);
@@ -557,13 +612,13 @@ document.addEventListener("DOMContentLoaded", () => {
     kickerRow.className = "card-kicker-row";
     const kicker = document.createElement("span");
     kicker.className = "card-kicker";
-    kicker.textContent = `${String(index + 1).padStart(2, "0")} · ${job["Tipo de emprego"] || "VAGA"}`;
+    kicker.textContent = `${String(index + 1).padStart(2, "0")} · ${job["Tipo de emprego"] || t("cardJobFallback")}`;
     kickerRow.appendChild(kicker);
 
     if (isSeen) {
       const seenBadge = document.createElement("span");
       seenBadge.className = "seen-badge";
-      seenBadge.textContent = "vista ✓";
+      seenBadge.textContent = t("seenBadge");
       kickerRow.appendChild(seenBadge);
     }
 
@@ -571,10 +626,10 @@ document.addEventListener("DOMContentLoaded", () => {
     header.className = "card-header";
     const title = document.createElement("h3");
     title.className = "card-title";
-    title.textContent = job.title || "Título não disponível";
+    title.textContent = job.title || t("cardTitleFallback");
     const company = document.createElement("p");
     company.className = "card-subtitle";
-    company.textContent = job.company || "Empresa não informada";
+    company.textContent = job.company || t("cardCompanyFallback");
     header.append(title, company);
 
     const badges = document.createElement("div");
@@ -602,7 +657,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const detailsBtn = document.createElement("button");
     detailsBtn.type = "button";
     detailsBtn.className = "card-action-link";
-    detailsBtn.textContent = "ver detalhes ↗";
+    detailsBtn.textContent = t("btnDetails");
     detailsBtn.addEventListener("click", () => {
       markJobAsSeen(job.id, card);
       openJobModal(job);
@@ -613,7 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
     openLink.href = job.link || "#";
     openLink.target = "_blank";
     openLink.rel = "noopener noreferrer";
-    openLink.textContent = "ver no linkedin ↗";
+    openLink.textContent = t("btnOpenLinkedin");
     openLink.addEventListener("click", () => markJobAsSeen(job.id, card));
 
     actions.append(detailsBtn, openLink);
@@ -622,7 +677,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function openJobModal(job) {
-    modalTitle.textContent = job.title || "Vaga LinkedIn";
+    modalTitle.textContent = job.title || t("cardTitleFallback");
     modalCompany.textContent = job.company || "";
     modalBadges.innerHTML = "";
     if (job.location) modalBadges.appendChild(createMetaBadge("bi bi-geo-alt", job.location));
@@ -634,7 +689,7 @@ document.addEventListener("DOMContentLoaded", () => {
       modalBadges.appendChild(createMetaBadge("bi bi-briefcase", job["Tipo de emprego"]));
     }
 
-    modalDescription.textContent = job.description || "Descrição não disponível.";
+    modalDescription.textContent = job.description || t("modalNoDesc");
     modalLink.href = job.link || "#";
     jobModal.style.display = "flex";
   }
@@ -644,18 +699,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateCounts(visibleCount, totalCount = visibleCount) {
-    const suffix = visibleCount === 1 ? "vaga" : "vagas";
+    const label = visibleCount === 1 ? t("jobSingular") : t("jobPlural");
     const text =
       visibleCount !== totalCount
-        ? `${visibleCount} de ${totalCount} ${suffix}`
-        : `${visibleCount} ${suffix}`;
+        ? t("ofTotal", { visible: visibleCount, total: totalCount, label })
+        : `${visibleCount} ${label}`;
     if (resultsCountText) resultsCountText.textContent = text;
     if (navbarResultsCount) navbarResultsCount.textContent = text;
   }
 
   function updateStatusBar(data) {
     const pct = Math.round(data.progress || 0);
-    statusText.textContent = data.status_message || "Buscando...";
+    statusText.textContent = data.status_message || t("statusSearching");
     statusPercent.textContent = `${pct}%`;
     progressBar.style.width = `${pct}%`;
   }
@@ -700,7 +755,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ type: "jobs" }),
       });
     } catch (error) {
-      showFeedback(`Erro ao parar busca: ${error.message}`);
+      showFeedback(`${t("errStop")}${error.message}`);
     } finally {
       setIdleState();
     }

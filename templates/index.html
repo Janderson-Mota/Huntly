@@ -19,11 +19,21 @@
     <div class="navbar-inner">
       <a class="navbar-brand" href="#">huntly.</a>
       <nav class="navbar-links">
-        <a href="#filtros" class="nav-link">filtros</a>
-        <a href="#resultados" class="nav-link">resultados</a>
+        <a href="#filtros" class="nav-link" data-i18n="navFilters">filtros</a>
+        <a href="#resultados" class="nav-link" data-i18n="navResults">resultados</a>
         <span class="results-pill" id="navbar-results-pill">
           <span id="navbar-results-count">0 vagas</span>
         </span>
+        <select id="lang-select" class="lang-select" aria-label="Language">
+          <option value="pt">PT</option>
+          <option value="en">EN</option>
+          <option value="es">ES</option>
+          <option value="fr">FR</option>
+          <option value="it">IT</option>
+          <option value="de">DE</option>
+          <option value="ru">RU</option>
+          <option value="zh">ZH</option>
+        </select>
       </nav>
     </div>
   </header>
@@ -32,9 +42,9 @@
     <!-- Hero Compacto -->
     <section class="hero-section">
       <h1 class="hero-title">
-        busca inteligente <span class="hero-accent">de vagas.</span>
+        <span data-i18n="heroTitleStart">busca inteligente </span><span class="hero-accent" data-i18n="heroTitleAccent">de vagas.</span>
       </h1>
-      <p class="hero-subtitle">
+      <p class="hero-subtitle" data-i18n="heroSubtitle">
         Filtre por país, estado, cidade, nível e modalidade — e abra cada oportunidade diretamente no LinkedIn.
       </p>
     </section>
@@ -45,10 +55,11 @@
         <!-- Campos Principais -->
         <div class="primary-inputs-grid">
           <div class="form-group">
-            <label for="keywords" id="keywords-label">Cargo ou Palavra-chave</label>
+            <label for="keywords" id="keywords-label" data-i18n="labelKeywords">Cargo ou Palavra-chave</label>
             <div class="input-with-icon">
               <i class="bi bi-search"></i>
               <input type="text" class="form-control" id="keywords" name="keywords" list="it-role-suggestions"
+                data-i18n-placeholder="placeholderKeywords"
                 placeholder="Ex: Desenvolvedor Python, Engenheiro de Dados, DevOps..." required />
               <datalist id="it-role-suggestions">
                 <option value="Desenvolvedor Full Stack"></option>
@@ -88,17 +99,17 @@
           <div class="location-cascade" id="location-group">
             <div class="location-selects-grid">
               <div class="form-group">
-                <label for="country">País</label>
+                <label for="country" data-i18n="labelCountry">País</label>
                 <select id="country" name="country" class="form-control"></select>
               </div>
               <div class="form-group">
-                <label for="state">Estado / Região</label>
+                <label for="state" data-i18n="labelState">Estado / Região</label>
                 <select id="state" name="state" class="form-control"></select>
               </div>
               <div class="form-group">
-                <label for="city">Cidade (opcional)</label>
+                <label for="city" data-i18n="labelCity">Cidade (opcional)</label>
                 <input type="text" class="form-control" id="city" name="city" list="city-suggestions"
-                  placeholder="Ex: Belo Horizonte" />
+                  data-i18n-placeholder="placeholderCity" placeholder="Ex: Belo Horizonte" />
                 <datalist id="city-suggestions"></datalist>
               </div>
             </div>
@@ -109,47 +120,47 @@
         <div id="job-filters" class="advanced-filters">
           <div class="filters-grid">
             <div class="form-group">
-              <label for="job_max_date">Data de publicação</label>
+              <label for="job_max_date" data-i18n="labelDate">Data de publicação</label>
               <select name="job_max_date" class="form-control" id="job_max_date">
-                <option value="" selected>Qualquer data</option>
-                <option value="r24h">Últimas 24 horas</option>
-                <option value="r3d">Últimos 3 dias</option>
-                <option value="r7d">Última semana</option>
-                <option value="r1m">Último mês</option>
+                <option value="" selected data-i18n="dateAny">Qualquer data</option>
+                <option value="r24h" data-i18n="date24h">Últimas 24 horas</option>
+                <option value="r3d" data-i18n="date3d">Últimos 3 dias</option>
+                <option value="r7d" data-i18n="date7d">Última semana</option>
+                <option value="r1m" data-i18n="date1m">Último mês</option>
               </select>
             </div>
 
             <div class="form-group">
-              <label for="experience_level">Nível de experiência</label>
+              <label for="experience_level" data-i18n="labelExperience">Nível de experiência</label>
               <select name="experience_level" class="form-control" id="experience_level">
-                <option value="" selected>Todos os níveis</option>
-                <option value="1">Estágio</option>
-                <option value="2">Júnior</option>
-                <option value="3,4">Pleno</option>
-                <option value="4">Sênior</option>
-                <option value="5,6">Diretor</option>
+                <option value="" selected data-i18n="expAll">Todos os níveis</option>
+                <option value="1" data-i18n="expIntern">Estágio</option>
+                <option value="2" data-i18n="expJunior">Júnior</option>
+                <option value="3,4" data-i18n="expMid">Pleno</option>
+                <option value="4" data-i18n="expSenior">Sênior</option>
+                <option value="5,6" data-i18n="expDirector">Diretor</option>
               </select>
             </div>
 
             <div class="form-group">
-              <label for="place">Modalidade de trabalho</label>
+              <label for="place" data-i18n="labelPlace">Modalidade de trabalho</label>
               <select name="place" class="form-control" id="place">
-                <option value="" selected>Todas as modalidades</option>
-                <option value="2">Remoto</option>
-                <option value="3">Híbrido</option>
-                <option value="1">Presencial</option>
+                <option value="" selected data-i18n="placeAll">Todas as modalidades</option>
+                <option value="2" data-i18n="placeRemote">Remoto</option>
+                <option value="3" data-i18n="placeHybrid">Híbrido</option>
+                <option value="1" data-i18n="placeOnsite">Presencial</option>
               </select>
             </div>
 
             <div class="form-group">
-              <label for="job_type">Tipo de contrato</label>
+              <label for="job_type" data-i18n="labelJobType">Tipo de contrato</label>
               <select name="job_type" class="form-control" id="job_type">
-                <option value="" selected>Todos os tipos</option>
-                <option value="F">Tempo Integral</option>
-                <option value="P">Meio Período</option>
-                <option value="I">Estágio</option>
-                <option value="C">Contrato</option>
-                <option value="T">Temporário</option>
+                <option value="" selected data-i18n="typeAll">Todos os tipos</option>
+                <option value="F" data-i18n="typeFull">Tempo Integral</option>
+                <option value="P" data-i18n="typePart">Meio Período</option>
+                <option value="I" data-i18n="typeIntern">Estágio</option>
+                <option value="C" data-i18n="typeContract">Contrato</option>
+                <option value="T" data-i18n="typeTemp">Temporário</option>
               </select>
             </div>
           </div>
@@ -158,18 +169,18 @@
         <!-- Ações Principais -->
         <div class="form-actions">
           <button type="submit" class="btn btn-primary" id="search-btn">
-            <span id="search-btn-text">Buscar Vagas</span>
+            <span id="search-btn-text" data-i18n="btnSearch">Buscar Vagas</span>
             <i class="bi bi-arrow-right"></i>
           </button>
 
           <button type="button" class="btn btn-outline" id="reset-filters-btn">
             <i class="bi bi-arrow-counterclockwise"></i>
-            limpar filtros
+            <span data-i18n="btnReset">limpar filtros</span>
           </button>
 
           <button type="button" class="btn btn-danger" id="stop-button" style="display: none">
             <i class="bi bi-stop-circle"></i>
-            Parar Busca
+            <span data-i18n="btnStop">Parar Busca</span>
           </button>
         </div>
       </form>
@@ -179,7 +190,7 @@
         <div class="status-meta">
           <span class="status-indicator">
             <i class="bi bi-arrow-repeat spin" id="status-spinner"></i>
-            <span class="status-text">Preparando busca...</span>
+            <span class="status-text" data-i18n="statusPreparing">Preparando busca...</span>
           </span>
           <span class="status-percent" id="status-percent">0%</span>
         </div>
@@ -198,23 +209,24 @@
         <div class="quick-filter-box">
           <i class="bi bi-funnel"></i>
           <input type="text" id="quick-filter-input" class="form-control form-control-sm"
+            data-i18n-placeholder="quickFilterPlaceholder"
             placeholder="Filtrar cards por título, empresa ou cidade..." />
         </div>
 
         <div class="export-buttons">
           <span id="results-count-text" class="results-count-label">0 vagas</span>
-          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="csv" disabled>
+          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="csv" disabled data-i18n="btnExportCsv">
             exportar csv ↗
           </button>
-          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="json" disabled>
+          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="json" disabled data-i18n="btnExportJson">
             exportar json ↗
           </button>
         </div>
       </div>
 
       <div id="empty-state" class="empty-state">
-        <h3>Nenhuma busca realizada ainda</h3>
-        <p>Configure os filtros acima e clique em <strong>Buscar Vagas</strong> para exibir os cards aqui.</p>
+        <h3 data-i18n="emptyInitialTitle">Nenhuma busca realizada ainda</h3>
+        <p data-i18n="emptyInitialDesc">Configure os filtros acima e clique em Buscar Vagas para exibir os cards aqui.</p>
       </div>
 
       <div id="results-grid" class="results-grid"></div>
@@ -237,13 +249,14 @@
       <div id="modal-badges" class="modal-badges"></div>
       <div id="modal-description" class="modal-body"></div>
       <div class="modal-footer">
-        <a id="modal-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+        <a id="modal-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary" data-i18n="modalOpenLinkedin">
           abrir vaga no linkedin ↗
         </a>
       </div>
     </div>
   </div>
 
+  <script src="{{ url_for('static', filename='i18n.js') }}"></script>
   <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 
