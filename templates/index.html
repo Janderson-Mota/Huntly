@@ -22,26 +22,25 @@
         <a href="#filtros" class="nav-link">filtros</a>
         <a href="#resultados" class="nav-link">resultados</a>
         <span class="results-pill" id="navbar-results-pill">
-          <span id="navbar-results-count">0 resultados</span>
+          <span id="navbar-results-count">0 vagas</span>
         </span>
       </nav>
     </div>
   </header>
 
   <main class="main-container">
-    <!-- Hero Editorial Compacto -->
+    <!-- Hero Compacto -->
     <section class="hero-section">
       <h1 class="hero-title">
-        busca inteligente<br />
-        <span class="hero-accent">de oportunidades.</span>
+        busca inteligente <span class="hero-accent">de vagas.</span>
       </h1>
       <p class="hero-subtitle">
-        Filtre vagas por país, estado, cidade, nível e modalidade — e abra cada oportunidade diretamente no LinkedIn.
+        Filtre por país, estado, cidade, nível e modalidade — e abra cada oportunidade diretamente no LinkedIn.
       </p>
     </section>
 
     <!-- Painel de Filtros -->
-    <section class="filters-panel" aria-label="Filtros de Busca">
+    <section id="filtros" class="filters-panel" aria-label="Filtros de Busca">
       <form id="search-form">
         <!-- Campos Principais -->
         <div class="primary-inputs-grid">
@@ -50,16 +49,9 @@
             <div class="input-with-icon">
               <i class="bi bi-search"></i>
               <input type="text" class="form-control" id="keywords" name="keywords"
-                placeholder="Ex: Desenvolvedor Python, Estágio React..." required />
+                placeholder="Ex: Desenvolvedor Python, Estágio React, Dados..." required />
             </div>
-            <div class="chip-suggestions" id="keyword-chips">
-              <button type="button" class="suggestion-chip" data-target="keywords" data-value="estágio">estágio</button>
-              <button type="button" class="suggestion-chip" data-target="keywords" data-value="júnior">júnior</button>
-              <button type="button" class="suggestion-chip" data-target="keywords" data-value="python">python</button>
-              <button type="button" class="suggestion-chip" data-target="keywords" data-value="react">react</button>
-              <button type="button" class="suggestion-chip" data-target="keywords" data-value="node.js">node.js</button>
-              <button type="button" class="suggestion-chip" data-target="keywords" data-value="devops">devops</button>
-            </div>
+            <div class="chip-suggestions" id="recent-searches" style="display: none"></div>
           </div>
 
           <div class="location-cascade" id="location-group">
@@ -78,10 +70,6 @@
                   placeholder="Ex: Belo Horizonte" />
                 <datalist id="city-suggestions"></datalist>
               </div>
-            </div>
-            <div class="location-preview">
-              <i class="bi bi-geo-alt"></i>
-              <span id="location-preview-text">Brasil</span>
             </div>
           </div>
         </div>
@@ -166,9 +154,10 @@
         <div class="form-actions">
           <button type="submit" class="btn btn-primary" id="search-btn">
             <span id="search-btn-text">Buscar Vagas</span>
+            <i class="bi bi-arrow-right"></i>
           </button>
 
-          <button type="button" class="btn btn-secondary" id="reset-filters-btn">
+          <button type="button" class="btn btn-outline" id="reset-filters-btn">
             <i class="bi bi-arrow-counterclockwise"></i>
             limpar filtros
           </button>
@@ -194,21 +183,13 @@
         </div>
       </div>
 
-      <!-- Logs Colapsáveis -->
-      <details class="logs-details" id="logs-details">
-        <summary class="logs-summary">
-          <span><i class="bi bi-terminal"></i> logs de execução</span>
-          <button type="button" id="clear-logs" class="btn btn-ghost btn-xs">
-            limpar
-          </button>
-        </summary>
-        <div id="logs-container" class="logs-content"></div>
-      </details>
+      <!-- Mensagem de Erro / Aviso discreta -->
+      <div id="feedback-banner" class="feedback-banner" style="display: none"></div>
     </section>
 
     <!-- Seção de Resultados em Cards abaixo dos filtros -->
-    <section class="results-section" aria-label="Resultados da Busca">
-      <div class="results-toolbar">
+    <section id="resultados" class="results-section" aria-label="Resultados da Busca">
+      <div id="results-toolbar" class="results-toolbar" style="display: none">
         <div class="quick-filter-box">
           <i class="bi bi-funnel"></i>
           <input type="text" id="quick-filter-input" class="form-control form-control-sm"
@@ -216,10 +197,11 @@
         </div>
 
         <div class="export-buttons">
-          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="csv">
+          <span id="results-count-text" class="results-count-label">0 vagas</span>
+          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="csv" disabled>
             exportar csv ↗
           </button>
-          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="json">
+          <button type="button" class="btn btn-outline btn-sm export-btn" data-format="json" disabled>
             exportar json ↗
           </button>
         </div>

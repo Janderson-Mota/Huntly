@@ -1,6 +1,6 @@
 # Huntly — Buscador de Vagas LinkedIn
 
-Aplicação web em Flask para buscar oportunidades em TI no LinkedIn, **com foco em empresas e vagas do Brasil**, além de suporte a exportação em CSV e JSON.
+Aplicação web em Flask para buscar oportunidades em TI no LinkedIn, com filtros avançados por localização (país, estado e cidade), nível de experiência, modalidade, tipo de contrato, candidatura simplificada e exportação em CSV/JSON.
 
 ## Requisitos
 
@@ -45,11 +45,12 @@ http://localhost:5000
 > Para rodar em modo debug durante desenvolvimento:
 > `FLASK_DEBUG=true python app.py` (Linux/Mac) ou `$env:FLASK_DEBUG="true"; python app.py` (PowerShell).
 
-## Funcionalidades e Limitações
+## Funcionalidades
 
-- **Busca de Vagas (`jobs`)**: Utiliza a interface pública de vagas do LinkedIn (`jobs-guest`), coletando título, empresa, localização, descrição e critérios com requisições concorrentes e retentativas com backoff.
-- **Publicações e Pessoas (`publications` / `people`)**: O LinkedIn restringe a busca pública de publicações e perfis sem autenticação (authwall). Quando bloqueado, o Huntly informa o status nos logs sem retornar dados fictícios.
-- **Exportação**: Exporte os resultados coletados em **CSV** (compatível com Excel UTF-8 BOM) ou **JSON**.
+- **Localização em Cascata**: Selecione País → Estado/Região → Cidade (opcional) com sugestões automáticas.
+- **Filtros Avançados**: Data de publicação, nível de experiência, modalidade (`Remoto`, `Híbrido`, `Presencial`), tipo de contrato, distância máxima, ordenação e candidatura simplificada.
+- **Cards Paginados e Abertura Direta**: Visualização em cards (9 por página) com preview da descrição em modal, link direto para a vaga oficial no LinkedIn e marcação automática de vagas já vistas.
+- **Filtro Rápido e Exportação**: Filtragem instantânea nos resultados carregados e download em **CSV** (UTF-8 BOM para Excel) ou **JSON**.
 
 ## Testes
 

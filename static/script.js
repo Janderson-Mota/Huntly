@@ -5,11 +5,34 @@ document.addEventListener("DOMContentLoaded", () => {
   const resetFiltersBtn = document.getElementById("reset-filters-btn");
 
   const keywordsInput = document.getElementById("keywords");
+  const recentSearchesEl = document.getElementById("recent-searches");
   const countrySelect = document.getElementById("country");
   const stateSelect = document.getElementById("state");
   const cityInput = document.getElementById("city");
   const cityDatalist = document.getElementById("city-suggestions");
-  const locationPreviewText = document.getElementById("location-preview-text");
+
+  const statusSection = document.getElementById("status-section");
+  const statusText = document.querySelector(".status-text");
+  const statusPercent = document.getElementById("status-percent");
+  const progressBar = document.getElementById("progress-bar");
+  const feedbackBanner = document.getElementById("feedback-banner");
+
+  const resultsToolbar = document.getElementById("results-toolbar");
+  const resultsGrid = document.getElementById("results-grid");
+  const paginationBar = document.getElementById("pagination-bar");
+  const emptyState = document.getElementById("empty-state");
+  const resultsCountText = document.getElementById("results-count-text");
+  const navbarResultsCount = document.getElementById("navbar-results-count");
+  const quickFilterInput = document.getElementById("quick-filter-input");
+  const exportButtons = document.querySelectorAll(".export-btn");
+
+  const jobModal = document.getElementById("job-modal");
+  const closeModalBtn = document.getElementById("close-modal-btn");
+  const modalTitle = document.getElementById("modal-title");
+  const modalCompany = document.getElementById("modal-company");
+  const modalBadges = document.getElementById("modal-badges");
+  const modalDescription = document.getElementById("modal-description");
+  const modalLink = document.getElementById("modal-link");
 
   const LOCATION_DATA = {
     Brasil: {
@@ -87,79 +110,134 @@ document.addEventListener("DOMContentLoaded", () => {
     },
   };
 
-  const statusSection = document.getElementById("status-section");
-  const statusText = document.querySelector(".status-text");
-  const statusPercent = document.getElementById("status-percent");
-  const progressBar = document.getElementById("progress-bar");
-
-  const logsContainer = document.getElementById("logs-container");
-  const clearLogsButton = document.getElementById("clear-logs");
-
-  const resultsGrid = document.getElementById("results-grid");
-  let paginationBar = document.getElementById("pagination-bar");
-  if (!paginationBar && resultsGrid && resultsGrid.parentNode) {
-    paginationBar = document.createElement("nav");
-    paginationBar.id = "pagination-bar";
-    paginationBar.className = "pagination-bar";
-    paginationBar.style.display = "none";
-    resultsGrid.parentNode.insertBefore(paginationBar, resultsGrid.nextSibling);
-  }
-  const emptyState = document.getElementById("empty-state");
-  const resultsCountText = document.getElementById("results-count-text");
-  const navbarResultsCount = document.getElementById("navbar-results-count");
-  const quickFilterInput = document.getElementById("quick-filter-input");
-  const exportButtons = document.querySelectorAll(".export-btn");
-
-  const jobModal = document.getElementById("job-modal");
-  const closeModalBtn = document.getElementById("close-modal-btn");
-  const modalTitle = document.getElementById("modal-title");
-  const modalCompany = document.getElementById("modal-company");
-  const modalBadges = document.getElementById("modal-badges");
-  const modalDescription = document.getElementById("modal-description");
-  const modalLink = document.getElementById("modal-link");
+  const STORAGE_KEYS = {
+    filters: "huntly_last_filters",
+    recentKeywords: "huntly_recent_keywords",
+    seenJobs: "huntly_seen_jobs",
+  };
 
   const ITEMS_PER_PAGE = 9;
-  const currentSearchType = "jobs";
   let isSearching = false;
   let searchResults = [];
   let currentPage = 1;
   let pollTimeout = null;
 
-  // Event Listeners
-  searchForm.addEventListener("submit", handleSearch);
-  stopButton.addEventListener("click", stopSearch);
-  resetFiltersBtn.addEventListener("click", resetFilters);
-  clearLogsButton.addEventListener("click", (e) => {
-    e.preventDefault();
-    logsContainer.innerHTML = "";
-    log("Logs limpos", "info");
-  });
+  function readStorage(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
 
-  quickFilterInput.addEventListener("input", () => {
-    currentPage = 1;
-    renderFilteredResults();
-  });
+  function writeStorage(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
 
-  exportButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const format = btn.dataset.format;
-      if (!searchResults.length) {
-        log("Nenhum resultado disponível para exportar.", "warn");
-        return;
+  function getSeenJobs() {
+    return new Set(readStorage(STORAGE_KEYS.seenJobs, []));
+  }
+
+  function markJobAsSeen(jobId, cardEl) {
+    if (!jobId) return;
+    const seen = getSeenJobs();
+    if (!seen.has(jobId)) {
+      seen.add(jobId);
+      writeStorage(STORAGE_KEYS.seenJobs, Array.from(seen).slice(-300));
+    }
+    if (cardEl && !cardEl.classList.contains("is-seen")) {
+      cardEl.classList.add("is-seen");
+      const kickerRow = cardEl.querySelector(".card-kicker-row");
+      if (kickerRow && !kickerRow.querySelector(".seen-badge")) {
+        const badge = document.createElement("span");
+        badge.className = "seen-badge";
+        badge.textContent = "vista ✓";
+        kickerRow.appendChild(badge);
       }
-      window.location.href = `/export/${format}?type=${encodeURIComponent(currentSearchType)}`;
-    });
-  });
+    }
+  }
 
-  document.querySelectorAll(".suggestion-chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const target = document.getElementById(chip.dataset.target);
-      if (target) {
-        target.value = chip.dataset.value;
-        target.focus();
-      }
+  function saveRecentKeyword(keyword) {
+    const clean = keyword.trim();
+    if (!clean) return;
+    const current = readStorage(STORAGE_KEYS.recentKeywords, []).filter(
+      (item) => item.toLowerCase() !== clean.toLowerCase()
+    );
+    const updated = [clean, ...current].slice(0, 5);
+    writeStorage(STORAGE_KEYS.recentKeywords, updated);
+    renderRecentKeywords();
+  }
+
+  function renderRecentKeywords() {
+    const recent = readStorage(STORAGE_KEYS.recentKeywords, []);
+    recentSearchesEl.innerHTML = "";
+    if (!recent.length) {
+      recentSearchesEl.style.display = "none";
+      return;
+    }
+    recentSearchesEl.style.display = "flex";
+    const label = document.createElement("span");
+    label.className = "chip-label";
+    label.textContent = "Recentes:";
+    recentSearchesEl.appendChild(label);
+
+    recent.forEach((kw) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "suggestion-chip";
+      btn.textContent = kw;
+      btn.addEventListener("click", () => {
+        keywordsInput.value = kw;
+        keywordsInput.focus();
+      });
+      recentSearchesEl.appendChild(btn);
     });
-  });
+  }
+
+  function saveCurrentFilters() {
+    const formData = new FormData(searchForm);
+    writeStorage(STORAGE_KEYS.filters, {
+      keywords: formData.get("keywords") || "",
+      country: countrySelect.value,
+      state: stateSelect.value,
+      city: cityInput.value,
+      job_max_date: formData.get("job_max_date") || "r7d",
+      experience_level: formData.get("experience_level") || "",
+      place: formData.get("place") || "",
+      job_type: formData.get("job_type") || "",
+      distance: formData.get("distance") || "",
+      sort_by: formData.get("sort_by") || "DD",
+      easy_apply: formData.get("easy_apply") || "",
+    });
+  }
+
+  function restoreSavedFilters() {
+    const saved = readStorage(STORAGE_KEYS.filters, null);
+    if (!saved) return;
+
+    if (saved.keywords) keywordsInput.value = saved.keywords;
+    if (saved.country !== undefined) {
+      countrySelect.value = saved.country;
+      populateStates(saved.country);
+    }
+    if (saved.state) {
+      stateSelect.value = saved.state;
+      populateCitySuggestions(countrySelect.value, saved.state);
+    }
+    if (saved.city) cityInput.value = saved.city;
+
+    ["job_max_date", "experience_level", "place", "job_type", "distance", "sort_by", "easy_apply"].forEach(
+      (field) => {
+        const el = document.getElementById(field);
+        if (el && saved[field] !== undefined) el.value = saved[field];
+      }
+    );
+  }
 
   function initLocationCascade() {
     countrySelect.innerHTML = "";
@@ -200,7 +278,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     cityInput.value = "";
     populateCitySuggestions(country, "");
-    updateLocationPreview();
   }
 
   function populateCitySuggestions(country, state) {
@@ -214,29 +291,32 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function buildLocationString() {
-    const country = countrySelect.value.trim();
-    const state = stateSelect.value.trim();
-    const city = cityInput.value.trim();
-    return [city, state, country].filter(Boolean).join(", ");
+    return [cityInput.value.trim(), stateSelect.value.trim(), countrySelect.value.trim()]
+      .filter(Boolean)
+      .join(", ");
   }
 
-  function updateLocationPreview() {
-    const country = countrySelect.value.trim();
-    const state = stateSelect.value.trim();
-    const city = cityInput.value.trim();
-    const parts = [country, state, city].filter(Boolean);
-    locationPreviewText.textContent = parts.length ? parts.join(" → ") : "Mundial (sem filtro de local)";
-  }
-
+  // Event Listeners
   countrySelect.addEventListener("change", () => populateStates(countrySelect.value));
   stateSelect.addEventListener("change", () => {
     cityInput.value = "";
     populateCitySuggestions(countrySelect.value, stateSelect.value);
-    updateLocationPreview();
   });
-  cityInput.addEventListener("input", updateLocationPreview);
 
-  initLocationCascade();
+  searchForm.addEventListener("submit", handleSearch);
+  stopButton.addEventListener("click", stopSearch);
+  resetFiltersBtn.addEventListener("click", resetFilters);
+  quickFilterInput.addEventListener("input", () => {
+    currentPage = 1;
+    renderFilteredResults();
+  });
+
+  exportButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!searchResults.length) return;
+      window.location.href = `/export/${btn.dataset.format}?type=jobs`;
+    });
+  });
 
   closeModalBtn.addEventListener("click", closeModal);
   jobModal.addEventListener("click", (e) => {
@@ -246,130 +326,64 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Escape" && jobModal.style.display !== "none") closeModal();
   });
 
-  function setSearchType(type) {
-    currentSearchType = type;
+  initLocationCascade();
+  restoreSavedFilters();
+  renderRecentKeywords();
 
-    searchTypeButtons.forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.type === type);
-    });
-
-    jobFilters.style.display = type === "jobs" ? "flex" : "none";
-    publicationFilters.style.display = type === "publications" ? "flex" : "none";
-    peopleFilters.style.display = type === "people" ? "flex" : "none";
-    locationGroup.style.display = type === "publications" ? "none" : "flex";
-
-    if (type === "jobs") {
-      keywordsLabel.textContent = "Cargo ou Palavra-chave";
-      keywordsInput.placeholder = "Ex: Desenvolvedor Python, Estágio React, Dados...";
-      searchBtnText.textContent = "Buscar Vagas";
-    } else if (type === "publications") {
-      keywordsLabel.textContent = "Tema da Publicação";
-      keywordsInput.placeholder = "Ex: vaga python, contratando dev, tecnologia...";
-      searchBtnText.textContent = "Buscar Publicações";
-    } else {
-      keywordsLabel.textContent = "Cargo ou Perfil";
-      keywordsInput.placeholder = "Ex: Tech Recruiter, CTO, Head de Engenharia...";
-      searchBtnText.textContent = "Buscar Pessoas";
+  function showFeedback(message) {
+    if (!message) {
+      feedbackBanner.style.display = "none";
+      feedbackBanner.textContent = "";
+      return;
     }
-
-    updateCounts(0);
-    searchResults = [];
-    resultsGrid.innerHTML = "";
-    emptyState.style.display = "flex";
+    feedbackBanner.textContent = message;
+    feedbackBanner.style.display = "block";
   }
 
   function resetFilters() {
     searchForm.reset();
     initLocationCascade();
     quickFilterInput.value = "";
-    log("Filtros restaurados para o padrão.", "info");
-  }
-
-  function log(message, type = "info") {
-    const timestamp = new Date().toLocaleTimeString("pt-BR");
-    const entry = document.createElement("div");
-    entry.className = `log-entry ${type}`;
-
-    const tsSpan = document.createElement("span");
-    tsSpan.className = "log-timestamp";
-    tsSpan.textContent = timestamp;
-
-    const typeSpan = document.createElement("span");
-    typeSpan.className = `log-type ${type}`;
-    typeSpan.textContent = type;
-
-    const msgSpan = document.createElement("span");
-    msgSpan.className = "log-message";
-    msgSpan.textContent = message;
-
-    entry.append(tsSpan, typeSpan, msgSpan);
-    logsContainer.insertBefore(entry, logsContainer.firstChild);
+    localStorage.removeItem(STORAGE_KEYS.filters);
+    showFeedback("");
   }
 
   function getFormData() {
     const formData = new FormData(searchForm);
-    const keywords = (formData.get("keywords") || "").trim();
-    const location = buildLocationString();
-
-    if (currentSearchType === "jobs") {
-      const jobType = formData.get("job_type");
-      const place = formData.get("place");
-      const expLevel = formData.get("experience_level");
-      const easyApply = formData.get("easy_apply") === "true";
-      return {
-        type: "jobs",
-        keywords,
-        location,
-        max_date: formData.get("job_max_date") || "r7d",
-        sort_by: formData.get("sort_by") || "DD",
-        distance: formData.get("distance") || "",
-        job_type: jobType ? [jobType] : [],
-        place: place ? [place] : [],
-        experience_level: expLevel ? [expLevel] : [],
-        easy_apply: easyApply,
-        limit_jobs: 100,
-      };
-    }
-
-    if (currentSearchType === "publications") {
-      return {
-        type: "publications",
-        keywords,
-        max_date: formData.get("pub_max_date") || "past-week",
-        limit_publications: Number(formData.get("limit_publications") || 50),
-      };
-    }
-
+    const jobType = formData.get("job_type");
+    const place = formData.get("place");
+    const expLevel = formData.get("experience_level");
     return {
-      type: "people",
-      keywords,
-      location,
-      hiring_only: hiringOnlyCheckbox.checked,
-      hiring_keywords: (hiringKeywordsInput.value || "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      limit_people: Number(formData.get("limit_people") || 50),
+      type: "jobs",
+      keywords: (formData.get("keywords") || "").trim(),
+      location: buildLocationString(),
+      max_date: formData.get("job_max_date") || "r7d",
+      sort_by: formData.get("sort_by") || "DD",
+      distance: formData.get("distance") || "",
+      job_type: jobType ? [jobType] : [],
+      place: place ? [place] : [],
+      experience_level: expLevel ? [expLevel] : [],
+      easy_apply: formData.get("easy_apply") === "true",
+      limit_jobs: 100,
     };
   }
 
   async function handleSearch(e) {
     e.preventDefault();
-    if (isSearching) {
-      log("Já existe uma busca em andamento.", "warn");
-      return;
-    }
+    if (isSearching) return;
 
     const searchData = getFormData();
     if (!searchData.keywords) {
-      log("Informe uma palavra-chave para iniciar a busca.", "error");
+      showFeedback("Informe um cargo ou palavra-chave para iniciar a busca.");
       return;
     }
 
+    showFeedback("");
+    saveCurrentFilters();
+    saveRecentKeyword(searchData.keywords);
+
     try {
       setSearching(true);
-      log(`Iniciando busca (${currentSearchType}): ${searchData.keywords}`);
-
       const response = await fetch("/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -383,14 +397,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
       pollResults();
     } catch (error) {
-      log(`Erro: ${error.message}`, "error");
+      showFeedback(`Erro: ${error.message}`);
       setIdleState();
     }
   }
 
   async function pollResults() {
     try {
-      const response = await fetch(`/status?type=${encodeURIComponent(currentSearchType)}`);
+      const response = await fetch("/status?type=jobs");
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Falha ao consultar status");
 
@@ -398,25 +412,23 @@ document.addEventListener("DOMContentLoaded", () => {
       await fetchResults();
 
       if (data.status === "complete" || data.progress === 100) {
-        log(data.status_message || "Busca concluída!", "success");
         setIdleState();
       } else if (data.status === "error") {
-        log(data.status_message || "Erro durante a busca.", "error");
+        showFeedback(data.status_message || "Ocorreu um erro durante a busca.");
         setIdleState();
       } else if (data.status === "stopped" || !data.is_searching) {
-        log(data.status_message || "Busca interrompida.", "warn");
         setIdleState();
       } else {
         pollTimeout = setTimeout(pollResults, 900);
       }
     } catch (error) {
-      log(`Erro de comunicação: ${error.message}`, "error");
+      showFeedback(`Erro de comunicação: ${error.message}`);
       setIdleState();
     }
   }
 
   async function fetchResults() {
-    const response = await fetch(`/results?type=${encodeURIComponent(currentSearchType)}`);
+    const response = await fetch("/results?type=jobs");
     if (!response.ok) return;
     const data = await response.json();
     searchResults = Array.isArray(data) ? data : [];
@@ -424,19 +436,17 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderFilteredResults() {
+    const hasResults = searchResults.length > 0;
+    resultsToolbar.style.display = hasResults ? "flex" : "none";
+    exportButtons.forEach((btn) => {
+      btn.disabled = !hasResults;
+    });
+
     const term = quickFilterInput.value.trim().toLowerCase();
     const filtered = !term
       ? searchResults
       : searchResults.filter((item) => {
-          const haystack = [
-            item.title,
-            item.company,
-            item.location,
-            item.author,
-            item.name,
-            item.headline,
-            item.description,
-          ]
+          const haystack = [item.title, item.company, item.location, item.description]
             .filter(Boolean)
             .join(" ")
             .toLowerCase();
@@ -451,14 +461,14 @@ document.addEventListener("DOMContentLoaded", () => {
       emptyState.style.display = "flex";
       const h3 = emptyState.querySelector("h3");
       const p = emptyState.querySelector("p");
-      if (searchResults.length > 0 && term) {
+      if (hasResults && term) {
         h3.textContent = "Nenhum card corresponde ao filtro rápido";
-        p.textContent = `Tente limpar o filtro "${quickFilterInput.value}" para ver todos os ${searchResults.length} resultados.`;
+        p.textContent = `Tente limpar o filtro "${quickFilterInput.value}" para ver todas as ${searchResults.length} vagas.`;
       } else if (isSearching) {
-        h3.textContent = "Coletando resultados...";
+        h3.textContent = "Coletando vagas...";
         p.textContent = "Os cards aparecerão aqui conforme forem encontrados.";
       } else {
-        h3.textContent = "Nenhum resultado para exibir";
+        h3.textContent = "Nenhuma vaga para exibir";
         p.textContent = "Configure os filtros acima e clique em Buscar Vagas.";
       }
       return;
@@ -470,9 +480,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
     const pageItems = filtered.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+    const seenJobs = getSeenJobs();
 
     pageItems.forEach((item, idx) => {
-      resultsGrid.appendChild(createJobCard(item, startIdx + idx));
+      resultsGrid.appendChild(createJobCard(item, startIdx + idx, seenJobs.has(item.id)));
     });
 
     renderPagination(filtered.length, totalPages);
@@ -553,26 +564,34 @@ document.addEventListener("DOMContentLoaded", () => {
     return badge;
   }
 
-  function attachCardNavigation(card, url) {
-    if (!url || url === "#") return;
-    card.style.cursor = "pointer";
-    card.addEventListener("click", (e) => {
-      if (e.target.closest("button, a")) return;
-      window.open(url, "_blank", "noopener,noreferrer");
-    });
-  }
-
-  function createJobCard(job, index = 0) {
+  function createJobCard(job, index = 0, isSeen = false) {
     const card = document.createElement("article");
-    card.className = "result-card";
-    attachCardNavigation(card, job.link);
+    card.className = `result-card${isSeen ? " is-seen" : ""}`;
+
+    if (job.link && job.link !== "#") {
+      card.style.cursor = "pointer";
+      card.addEventListener("click", (e) => {
+        if (e.target.closest("button, a")) return;
+        markJobAsSeen(job.id, card);
+        window.open(job.link, "_blank", "noopener,noreferrer");
+      });
+    }
 
     const top = document.createElement("div");
 
-    const kicker = document.createElement("div");
+    const kickerRow = document.createElement("div");
+    kickerRow.className = "card-kicker-row";
+    const kicker = document.createElement("span");
     kicker.className = "card-kicker";
-    const num = String(index + 1).padStart(2, "0");
-    kicker.textContent = `${num} · ${job["Tipo de emprego"] || "VAGA"}`;
+    kicker.textContent = `${String(index + 1).padStart(2, "0")} · ${job["Tipo de emprego"] || "VAGA"}`;
+    kickerRow.appendChild(kicker);
+
+    if (isSeen) {
+      const seenBadge = document.createElement("span");
+      seenBadge.className = "seen-badge";
+      seenBadge.textContent = "vista ✓";
+      kickerRow.appendChild(seenBadge);
+    }
 
     const header = document.createElement("div");
     header.className = "card-header";
@@ -592,7 +611,7 @@ document.addEventListener("DOMContentLoaded", () => {
       badges.appendChild(createMetaBadge("bi bi-bar-chart", job["Nível de experiência"]));
     }
 
-    top.append(kicker, header);
+    top.append(kickerRow, header);
 
     if (job.description) {
       const excerpt = document.createElement("p");
@@ -610,7 +629,10 @@ document.addEventListener("DOMContentLoaded", () => {
     detailsBtn.type = "button";
     detailsBtn.className = "card-action-link";
     detailsBtn.textContent = "ver detalhes ↗";
-    detailsBtn.addEventListener("click", () => openJobModal(job));
+    detailsBtn.addEventListener("click", () => {
+      markJobAsSeen(job.id, card);
+      openJobModal(job);
+    });
 
     const openLink = document.createElement("a");
     openLink.className = "card-action-link";
@@ -618,86 +640,9 @@ document.addEventListener("DOMContentLoaded", () => {
     openLink.target = "_blank";
     openLink.rel = "noopener noreferrer";
     openLink.textContent = "ver no linkedin ↗";
+    openLink.addEventListener("click", () => markJobAsSeen(job.id, card));
 
     actions.append(detailsBtn, openLink);
-    card.append(top, actions);
-    return card;
-  }
-
-  function createPublicationCard(pub, index = 0) {
-    const card = document.createElement("article");
-    card.className = "result-card";
-    attachCardNavigation(card, pub.link);
-
-    const top = document.createElement("div");
-    const kicker = document.createElement("div");
-    kicker.className = "card-kicker";
-    kicker.textContent = `${String(index + 1).padStart(2, "0")} · PUBLICAÇÃO`;
-
-    const header = document.createElement("div");
-    header.className = "card-header";
-    const title = document.createElement("h3");
-    title.className = "card-title";
-    title.textContent = pub.title || "Publicação LinkedIn";
-    const author = document.createElement("p");
-    author.className = "card-subtitle";
-    author.textContent = pub.author || "Autor LinkedIn";
-    header.append(title, author);
-
-    const excerpt = document.createElement("p");
-    excerpt.className = "card-excerpt";
-    excerpt.textContent = pub.content || "";
-    top.append(kicker, header, excerpt);
-
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const openLink = document.createElement("a");
-    openLink.className = "card-action-link";
-    openLink.href = pub.link || "#";
-    openLink.target = "_blank";
-    openLink.rel = "noopener noreferrer";
-    openLink.textContent = "abrir no linkedin ↗";
-
-    actions.append(openLink);
-    card.append(top, actions);
-    return card;
-  }
-
-  function createPersonCard(person, index = 0) {
-    const card = document.createElement("article");
-    card.className = "result-card";
-    attachCardNavigation(card, person.link);
-
-    const top = document.createElement("div");
-    const kicker = document.createElement("div");
-    kicker.className = "card-kicker";
-    kicker.textContent = `${String(index + 1).padStart(2, "0")} · PERFIL`;
-
-    const header = document.createElement("div");
-    header.className = "card-header";
-    const name = document.createElement("h3");
-    name.className = "card-title";
-    name.textContent = person.name || "Perfil LinkedIn";
-    const headline = document.createElement("p");
-    headline.className = "card-excerpt";
-    headline.textContent = person.headline || "";
-    header.append(name, headline);
-
-    const badges = document.createElement("div");
-    badges.className = "card-badges";
-    badges.appendChild(createMetaBadge("bi bi-geo-alt", person.location || "Brasil"));
-    top.append(kicker, header, badges);
-
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const openLink = document.createElement("a");
-    openLink.className = "card-action-link";
-    openLink.href = person.link || "#";
-    openLink.target = "_blank";
-    openLink.rel = "noopener noreferrer";
-    openLink.textContent = "ver perfil ↗";
-
-    actions.append(openLink);
     card.append(top, actions);
     return card;
   }
@@ -725,18 +670,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateCounts(visibleCount, totalCount = visibleCount) {
-    const labelMap = {
-      jobs: visibleCount === 1 ? "vaga" : "vagas",
-      publications: visibleCount === 1 ? "publicação" : "publicações",
-      people: visibleCount === 1 ? "perfil" : "perfis",
-    };
-    const suffix = labelMap[currentSearchType] || "resultados";
+    const suffix = visibleCount === 1 ? "vaga" : "vagas";
     const text =
       visibleCount !== totalCount
         ? `${visibleCount} de ${totalCount} ${suffix}`
         : `${visibleCount} ${suffix}`;
-    resultsCountText.textContent = text;
-    navbarResultsCount.textContent = text;
+    if (resultsCountText) resultsCountText.textContent = text;
+    if (navbarResultsCount) navbarResultsCount.textContent = text;
   }
 
   function updateStatusBar(data) {
@@ -757,6 +697,7 @@ document.addEventListener("DOMContentLoaded", () => {
       searchResults = [];
       currentPage = 1;
       resultsGrid.innerHTML = "";
+      resultsToolbar.style.display = "none";
       paginationBar.style.display = "none";
       emptyState.style.display = "flex";
     }
@@ -782,11 +723,10 @@ document.addEventListener("DOMContentLoaded", () => {
       await fetch("/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: currentSearchType }),
+        body: JSON.stringify({ type: "jobs" }),
       });
-      log("Solicitação de parada enviada.", "warn");
     } catch (error) {
-      log(`Erro ao parar busca: ${error.message}`, "error");
+      showFeedback(`Erro ao parar busca: ${error.message}`);
     } finally {
       setIdleState();
     }

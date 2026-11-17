@@ -106,4 +106,3 @@ class SearchState:
                 self._total_key: self._total,
                 self._collected_key: self._collected,
             }
-

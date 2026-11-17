@@ -105,4 +105,3 @@ def test_search_state_bounds_logs_and_prevents_double_start():
     snap = state.snapshot()
     assert len(snap["log_messages"]) == MAX_LOG_ENTRIES
     state.stop()
-

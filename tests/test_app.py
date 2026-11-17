@@ -3,20 +3,16 @@ import json
 import pytest
 
 from app import app, generate_csv
-from people_scraper import people_state
-from publications_scraper import publications_state
 from scraper import jobs_state
 
 
 @pytest.fixture(autouse=True)
 def reset_states():
-    for state in (jobs_state, publications_state, people_state):
-        state.stop()
-        state.set_results([])
+    jobs_state.stop()
+    jobs_state.set_results([])
     yield
-    for state in (jobs_state, publications_state, people_state):
-        state.stop()
-        state.set_results([])
+    jobs_state.stop()
+    jobs_state.set_results([])
 
 
 @pytest.fixture
@@ -33,13 +29,12 @@ def test_home_route(client):
 
 
 def test_status_valid_and_invalid_types(client):
-    for search_type in ("jobs", "publications", "people"):
-        res = client.get(f"/status?type={search_type}")
-        assert res.status_code == 200
-        data = res.get_json()
-        assert "is_searching" in data
-        assert "progress" in data
-        assert "status" in data
+    res = client.get("/status?type=jobs")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert "is_searching" in data
+    assert "progress" in data
+    assert "status" in data
 
     bad = client.get("/status?type=invalid")
     assert bad.status_code == 400
@@ -102,4 +97,3 @@ def test_job_detail_endpoint(client):
 
 def test_generate_csv_empty():
     assert generate_csv([]) == ""
-
