@@ -1,6 +1,13 @@
 from unittest.mock import MagicMock, patch
 
-from scraper import MAX_RETRIES, build_params, calculate_time_range, get_job_ids_per_page, jobs_state
+from scraper import (
+    MAX_RETRIES,
+    _sanitize_job_url,
+    build_params,
+    calculate_time_range,
+    get_job_ids_per_page,
+    jobs_state,
+)
 from state import MAX_LOG_ENTRIES, SearchState
 
 
@@ -120,3 +127,12 @@ def test_search_state_bounds_logs_and_prevents_double_start():
     snap = state.snapshot()
     assert len(snap["log_messages"]) == MAX_LOG_ENTRIES
     state.stop()
+
+
+def test_sanitize_job_url_blocks_unsafe_schemes():
+    assert _sanitize_job_url("javascript:alert(1)", "999") == "https://www.linkedin.com/jobs/view/999/"
+    assert _sanitize_job_url("https://evil.com/phish", "999") == "https://www.linkedin.com/jobs/view/999/"
+    assert (
+        _sanitize_job_url("https://br.linkedin.com/jobs/view/dev-999?tracking=abc", "999")
+        == "https://br.linkedin.com/jobs/view/dev-999"
+    )

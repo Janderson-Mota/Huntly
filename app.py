@@ -14,10 +14,22 @@ app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
 
 def _parse_limit(raw_value: Any, default: int = 100, max_limit: int = 500) -> int:
     if raw_value is None or raw_value == "":
         return default
+    if isinstance(raw_value, bool):
+        raise ValueError("Limite deve ser um número inteiro válido.")
     try:
         value = int(raw_value)
     except (TypeError, ValueError) as exc:
@@ -25,7 +37,23 @@ def _parse_limit(raw_value: Any, default: int = 100, max_limit: int = 500) -> in
     return max(1, min(value, max_limit))
 
 
-def _validate_search_type(search_type: str):
+def _parse_str(raw_value: Any, max_len: int = 200) -> str:
+    if raw_value is None:
+        return ""
+    if not isinstance(raw_value, str):
+        raise ValueError("Parâmetro textual inválido.")
+    return raw_value.strip()[:max_len]
+
+
+def _parse_str_list(raw_value: Any) -> List[str]:
+    if raw_value is None or raw_value == "":
+        return []
+    if not isinstance(raw_value, list):
+        raise ValueError("Filtro deve ser uma lista.")
+    return [str(item).strip() for item in raw_value if item is not None and str(item).strip()]
+
+
+def _validate_search_type(search_type: Any):
     if search_type != "jobs":
         return jsonify({"error": "Tipo de busca inválido."}), 400
     return None
@@ -39,41 +67,70 @@ def home():
 @app.route("/search", methods=["POST"])
 def start_search():
     try:
-        params = request.get_json(silent=True) or {}
+        params = request.get_json(silent=True)
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            return jsonify({"error": "Payload JSON deve ser um objeto."}), 400
+
         err = _validate_search_type(params.get("type", "jobs"))
         if err:
             return err
 
-        if jobs_state.is_searching:
+        keywords = _parse_str(params.get("keywords"), max_len=200)
+        if not keywords:
+            return jsonify({"error": "Informe uma palavra-chave para buscar."}), 400
+
+        location = _parse_str(params.get("location"), max_len=200)
+        max_date = _parse_str(params.get("max_date"), max_len=30)
+        distance = _parse_str(params.get("distance"), max_len=10)
+        sort_by = _parse_str(params.get("sort_by"), max_len=10)
+        job_type = _parse_str_list(params.get("job_type"))
+        place = _parse_str_list(params.get("place"))
+        experience_level = _parse_str_list(params.get("experience_level"))
+        easy_apply = bool(params.get("easy_apply", False))
+        limit_jobs = _parse_limit(params.get("limit_jobs"), default=100)
+
+        if not jobs_state.start():
             return jsonify({"error": "Uma busca de vagas já está em andamento."}), 400
 
-        limit_jobs = _parse_limit(params.get("limit_jobs"), default=100)
         args = (
-            params.get("keywords", ""),
-            params.get("location", ""),
-            params.get("max_date", ""),
-            params.get("distance", ""),
-            params.get("job_type", []),
-            params.get("place", []),
+            keywords,
+            location,
+            max_date,
+            distance,
+            job_type,
+            place,
             limit_jobs,
-            params.get("experience_level", []),
-            params.get("sort_by", ""),
-            bool(params.get("easy_apply", False)),
+            experience_level,
+            sort_by,
+            easy_apply,
+            True,
         )
 
-        search_thread = threading.Thread(target=search_jobs_thread, args=args, daemon=True)
-        search_thread.start()
+        try:
+            search_thread = threading.Thread(target=search_jobs_thread, args=args, daemon=True)
+            search_thread.start()
+        except Exception:
+            jobs_state.stop()
+            raise
+
         return jsonify({"message": "Busca de vagas iniciada."}), 200
 
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"error": f"Erro interno: {exc}"}), 500
+    except Exception:
+        return jsonify({"error": "Erro interno ao iniciar a busca."}), 500
 
 
 @app.route("/stop", methods=["POST"])
 def stop_search():
-    params = request.get_json(silent=True) or {}
+    params = request.get_json(silent=True)
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        return jsonify({"error": "Payload JSON deve ser um objeto."}), 400
+
     search_type = params.get("type", "jobs")
     err = _validate_search_type(search_type)
     if err:
@@ -106,6 +163,13 @@ def get_job_details(job_id: str):
     return jsonify({"error": "Vaga não encontrada."}), 404
 
 
+def _sanitize_csv_cell(value: Any) -> Any:
+    """Neutralize spreadsheet formula injection (CWE-1236)."""
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
+
+
 def generate_csv(items: List[Dict[str, Any]]) -> str:
     if not items:
         return ""
@@ -123,7 +187,8 @@ def generate_csv(items: List[Dict[str, Any]]) -> str:
     writer.writeheader()
     for item in items:
         if not item.get("error"):
-            writer.writerow(item)
+            sanitized = {k: _sanitize_csv_cell(v) for k, v in item.items()}
+            writer.writerow(sanitized)
 
     return output.getvalue()
 

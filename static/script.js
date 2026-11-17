@@ -612,16 +612,23 @@ document.addEventListener("DOMContentLoaded", () => {
     return badge;
   }
 
+  function getSafeUrl(url) {
+    if (typeof url !== "string") return "#";
+    const trimmed = url.trim();
+    return trimmed.startsWith("https://") || trimmed.startsWith("http://") ? trimmed : "#";
+  }
+
   function createJobCard(job, index = 0, isSeen = false) {
     const card = document.createElement("article");
     card.className = `result-card${isSeen ? " is-seen" : ""}`;
+    const safeLink = getSafeUrl(job.link);
 
-    if (job.link && job.link !== "#") {
+    if (safeLink !== "#") {
       card.style.cursor = "pointer";
       card.addEventListener("click", (e) => {
         if (e.target.closest("button, a")) return;
         markJobAsSeen(job.id, card);
-        window.open(job.link, "_blank", "noopener,noreferrer");
+        window.open(safeLink, "_blank", "noopener,noreferrer");
       });
     }
 
@@ -684,7 +691,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const openLink = document.createElement("a");
     openLink.className = "card-action-link";
-    openLink.href = job.link || "#";
+    openLink.href = safeLink;
     openLink.target = "_blank";
     openLink.rel = "noopener noreferrer";
     openLink.textContent = t("btnOpenLinkedin");
@@ -709,7 +716,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     modalDescription.textContent = job.description || t("modalNoDesc");
-    modalLink.href = job.link || "#";
+    modalLink.href = getSafeUrl(job.link);
     jobModal.style.display = "flex";
   }
 

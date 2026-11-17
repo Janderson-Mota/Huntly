@@ -1,9 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import math
+import threading
 from time import sleep
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from bs4 import BeautifulSoup
 import requests
@@ -229,6 +230,18 @@ def get_job_ids_per_page(
     return []
 
 
+def _sanitize_job_url(raw_href: str, job_id: str) -> str:
+    """Allow only HTTPS LinkedIn URLs; fall back to canonical job view URL."""
+    fallback = f"{PUBLIC_JOB_URL}{job_id}/"
+    if not raw_href:
+        return fallback
+    cleaned = raw_href.split("?")[0].strip()
+    parsed = urlparse(cleaned)
+    if parsed.scheme == "https" and parsed.netloc.endswith("linkedin.com"):
+        return cleaned
+    return fallback
+
+
 def _parse_job_summaries(html: str) -> Dict[str, Dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
     summaries: Dict[str, Dict[str, Any]] = {}
@@ -244,7 +257,7 @@ def _parse_job_summaries(html: str) -> Dict[str, Dict[str, Any]]:
         time_el = li.find("time")
 
         raw_href = link_el.get("href", "").strip() if link_el else ""
-        clean_href = raw_href.split("?")[0] if raw_href else f"{PUBLIC_JOB_URL}{job_id}/"
+        clean_href = _sanitize_job_url(raw_href, job_id)
 
         summaries[job_id] = {
             "id": job_id,
@@ -317,10 +330,11 @@ def search_jobs_thread(
     place: List[str],
     limit_jobs: int,
     experience_level: Optional[List[str]] = None,
-    sort_by: str = "DD",
+    sort_by: str = "",
     easy_apply: bool = False,
+    already_started: bool = False,
 ) -> None:
-    if not jobs_state.start():
+    if not already_started and not jobs_state.start():
         return
 
     try:
@@ -394,26 +408,42 @@ def search_jobs_thread(
             jobs: List[Dict[str, Any]] = []
             total_to_fetch = len(job_ids)
 
-            with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as executor:
-                future_map = {
-                    executor.submit(get_job_detail, session, jid, summaries.get(jid)): jid
-                    for jid in job_ids
-                }
-                for completed, future in enumerate(as_completed(future_map), start=1):
-                    if not jobs_state.is_searching:
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        jobs_state.stop()
-                        return
+            thread_local = threading.local()
+            worker_sessions: List[requests.Session] = []
+            sessions_lock = threading.Lock()
 
-                    detail = future.result()
-                    if detail and not detail.get("error"):
-                        jobs.append(detail)
-                        jobs_state.set_results(jobs)
+            def fetch_detail_threadsafe(jid: str) -> Dict[str, Any]:
+                if not hasattr(thread_local, "session"):
+                    s = requests.Session()
+                    thread_local.session = s
+                    with sessions_lock:
+                        worker_sessions.append(s)
+                return get_job_detail(thread_local.session, jid, summaries.get(jid))
 
-                    progress = 50 + (completed / total_to_fetch) * 50
-                    jobs_state.update_progress(
-                        progress, f"Obtendo detalhes: {completed}/{total_to_fetch} ({len(jobs)} vagas)"
-                    )
+            try:
+                with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as executor:
+                    future_map = {
+                        executor.submit(fetch_detail_threadsafe, jid): jid
+                        for jid in job_ids
+                    }
+                    for completed, future in enumerate(as_completed(future_map), start=1):
+                        if not jobs_state.is_searching:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            jobs_state.stop()
+                            return
+
+                        detail = future.result()
+                        if detail and not detail.get("error"):
+                            jobs.append(detail)
+                            jobs_state.set_results(jobs)
+
+                        progress = 50 + (completed / total_to_fetch) * 50
+                        jobs_state.update_progress(
+                            progress, f"Obtendo detalhes: {completed}/{total_to_fetch} ({len(jobs)} vagas)"
+                        )
+            finally:
+                for ws in worker_sessions:
+                    ws.close()
 
             jobs_state.finish(f"Concluído: {len(jobs)} vagas encontradas")
 

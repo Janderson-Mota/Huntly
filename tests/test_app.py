@@ -41,11 +41,46 @@ def test_status_valid_and_invalid_types(client):
 
 
 def test_search_validation(client):
-    bad_type = client.post("/search", json={"type": "unknown"})
+    bad_type = client.post("/search", json={"type": "unknown", "keywords": "python"})
     assert bad_type.status_code == 400
 
-    bad_limit = client.post("/search", json={"type": "jobs", "limit_jobs": "abc"})
+    bad_limit = client.post("/search", json={"type": "jobs", "keywords": "python", "limit_jobs": "abc"})
     assert bad_limit.status_code == 400
+
+    bool_limit = client.post("/search", json={"type": "jobs", "keywords": "python", "limit_jobs": True})
+    assert bool_limit.status_code == 400
+
+    list_payload = client.post("/search", json=["not", "a", "dict"])
+    assert list_payload.status_code == 400
+
+    missing_kw = client.post("/search", json={"type": "jobs", "keywords": "   "})
+    assert missing_kw.status_code == 400
+
+    bad_filter_type = client.post("/search", json={"type": "jobs", "keywords": "python", "job_type": "F"})
+    assert bad_filter_type.status_code == 400
+
+
+def test_security_headers_present(client):
+    res = client.get("/")
+    assert res.headers.get("X-Content-Type-Options") == "nosniff"
+    assert res.headers.get("X-Frame-Options") == "DENY"
+    assert res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+
+def test_csv_formula_injection_is_neutralized():
+    csv_out = generate_csv([
+        {
+            "id": "1",
+            "title": "=CMD|'/C calc'!A0",
+            "company": "+1234",
+            "location": "-5678",
+            "description": "@SUM(A1:A2)",
+        }
+    ])
+    assert "'=CMD" in csv_out
+    assert "'+1234" in csv_out
+    assert "'-5678" in csv_out
+    assert "'@SUM" in csv_out
 
 
 def test_export_empty_returns_400(client):
