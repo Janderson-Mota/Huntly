@@ -386,14 +386,13 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       if (!Array.isArray(i18n[l].roleSuggestions) || i18n[l].roleSuggestions.length !== 51) {
         errors.push('Expected 51 roleSuggestions in ' + l);
       }
-      for (const internalBtn of ['btnExportCsv', 'btnExportJson', 'btnDetails']) {
-        if (String(i18n[l][internalBtn] || '').includes('↗')) {
-          errors.push('Unexpected external arrow in ' + internalBtn + ' for ' + l);
-        }
-      }
-      for (const extLink of ['btnOpenLinkedin', 'modalOpenLinkedin']) {
-        if (!String(i18n[l][extLink] || '').includes('↗')) {
-          errors.push('Missing external arrow in ' + extLink + ' for ' + l);
+      for (const arrowKey of [
+        'btnExportCsv', 'btnExportJson', 'btnDetails',
+        'btnOpenLinkedin', 'modalOpenLinkedin',
+        'pagePrev', 'pageNext', 'translatedFromTo'
+      ]) {
+        if (/[↗→←]/.test(String(i18n[l][arrowKey] || ''))) {
+          errors.push('Unexpected arrow glyph in ' + arrowKey + ' for ' + l);
         }
       }
       if (/\bIDs?\b/i.test(String(i18n[l].statusCollectingPages || ''))) {
@@ -637,6 +636,13 @@ def test_home_renders_minimalist_footer(client):
     assert 'class="navbar-controls"' in html
     assert 'id="modal-translating-indicator"' in html
     assert 'data-i18n="modalTranslating"' in html
+    assert 'bi-arrow-counterclockwise' not in html
+    assert 'bi-arrow-right' not in html
+    assert '↗' not in html
+    assert 'class="btn btn-outline btn-sm" id="reset-filters-btn"' in html
+    assert 'class="btn btn-primary btn-sm" id="search-btn"' in html
+    assert 'class="btn btn-danger btn-sm" id="stop-button"' in html
+    assert 'class="btn btn-primary btn-sm" data-i18n="modalOpenLinkedin"' in html
     assert '<footer class="site-footer"' in html
     assert 'data-i18n="footerRights"' in html
     footer_start = html.index('<footer class="site-footer"')
