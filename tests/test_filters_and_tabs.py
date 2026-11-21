@@ -382,6 +382,9 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
           errors.push('Missing external arrow in ' + extLink + ' for ' + l);
         }
       }
+      if (/\bIDs?\b/i.test(String(i18n[l].statusCollectingPages || ''))) {
+        errors.push('Technical ID jargon present in statusCollectingPages for ' + l);
+      }
     }
     console.log(JSON.stringify({ langs, errors }));
     """
