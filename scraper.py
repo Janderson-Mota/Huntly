@@ -386,6 +386,7 @@ _WORK_MODE_NON_LATIN: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
 MAX_RETRIES = 3
 REQUEST_TIMEOUT = 20
 DETAIL_WORKERS = 2
+UNLIMITED_JOBS_CAP = 250
 PAGE_SIZE = 10
 
 COUNTRY_ALIASES: Dict[str, str] = {
@@ -1069,15 +1070,17 @@ def get_job_count(
     time_range: str,
     distance: str,
     job_type: List[str],
-    place: List[str],
+    place: Union[List[str], str],
     limit_jobs: int,
-    experience_level: Optional[List[str]] = None,
+    experience_level: Optional[Union[List[str], str]] = None,
     sort_by: str = "DD",
     easy_apply: bool = False,
     lang: str = "en",
 ) -> int:
-    """Return configured job limit or LinkedIn cap when unlimited."""
-    return limit_jobs if limit_jobs > 0 else 1000
+    """Return configured job limit capped at UNLIMITED_JOBS_CAP when unlimited."""
+    if limit_jobs <= 0:
+        return UNLIMITED_JOBS_CAP
+    return min(limit_jobs, UNLIMITED_JOBS_CAP)
 
 
 def get_job_ids_per_page(
@@ -1341,6 +1344,8 @@ def search_jobs_thread(
             jobs_state.set_total(total_jobs, run_id=run_id)
             jobs_state.log(f"Buscando até ~{total_jobs} vagas ({num_pages} páginas)", run_id=run_id)
 
+            effective_limit = min(limit_jobs, UNLIMITED_JOBS_CAP) if limit_jobs > 0 else UNLIMITED_JOBS_CAP
+
             job_ids: List[str] = []
             seen_ids: set[str] = set()
             summaries: Dict[str, Dict[str, Any]] = {}
@@ -1383,7 +1388,7 @@ def search_jobs_thread(
                     status_code="statusCollectingPages",
                     status_params={"page": page + 1, "pages": num_pages, "count": len(job_ids)},
                 )
-                if not new_ids or (limit_jobs > 0 and len(job_ids) >= limit_jobs):
+                if not new_ids or len(job_ids) >= effective_limit:
                     break
                 start_offset += max(len(new_ids), PAGE_SIZE)
                 sleep(0.2)
@@ -1392,8 +1397,7 @@ def search_jobs_thread(
                 jobs_state.stop(run_id=run_id)
                 return
 
-            if limit_jobs > 0:
-                job_ids = job_ids[:limit_jobs]
+            job_ids = job_ids[:effective_limit]
 
             if not job_ids:
                 jobs_state.finish(

@@ -624,6 +624,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const formData = new FormData(searchForm);
     const workModes = getMultiSelectValues(workModeMultiselect);
     const experienceLevels = getMultiSelectValues(experienceMultiselect);
+    const rawLimit = String(formData.get("limit_jobs") || "25");
     return {
       type: "jobs",
       lang: currentLang,
@@ -637,7 +638,7 @@ document.addEventListener("DOMContentLoaded", () => {
       place: workModes,
       experience_level: experienceLevels,
       easy_apply: Boolean(easyApplyCheckbox && easyApplyCheckbox.checked),
-      limit_jobs: 100,
+      limit_jobs: rawLimit === "unlimited" ? "unlimited" : Number(rawLimit) || 25,
     };
   }
 

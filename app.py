@@ -17,6 +17,8 @@ _debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
 app.config["TEMPLATES_AUTO_RELOAD"] = _debug_mode
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0 if _debug_mode else 3600
 
+DEFAULT_LIMIT_JOBS = 25
+UNLIMITED_JOBS_CAP = 250
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 _EXPORT_PREFIXES = {
     "pt": "vagas_linkedin",
@@ -46,15 +48,19 @@ def add_security_headers(response):
     return response
 
 
-def _parse_limit(raw_value: Any, default: int = 100, max_limit: int = 500) -> int:
+def _parse_limit(raw_value: Any, default: int = DEFAULT_LIMIT_JOBS, max_limit: int = UNLIMITED_JOBS_CAP) -> int:
     if raw_value is None or raw_value == "":
         return default
     if isinstance(raw_value, bool):
         raise _ValidationError("Limite deve ser um número inteiro válido.", "errInvalidLimit")
+    if isinstance(raw_value, str) and raw_value.strip().lower() in ("unlimited", "all", "sem_restricao"):
+        return UNLIMITED_JOBS_CAP
     try:
         value = int(raw_value)
     except (TypeError, ValueError) as exc:
         raise _ValidationError("Limite deve ser um número inteiro válido.", "errInvalidLimit") from exc
+    if value == 0:
+        return UNLIMITED_JOBS_CAP
     return max(1, min(value, max_limit))
 
 
@@ -161,7 +167,7 @@ def start_search():
         place = _parse_multi_filter(raw_work_mode)
         experience_level = _parse_multi_filter(params.get("experience_level"))
         easy_apply = _parse_bool(params.get("easy_apply"), default=False)
-        limit_jobs = _parse_limit(params.get("limit_jobs"), default=100)
+        limit_jobs = _parse_limit(params.get("limit_jobs"), default=DEFAULT_LIMIT_JOBS)
         lang = _parse_str(params.get("lang"), max_len=10).lower() or "en"
 
         if not jobs_state.start():
