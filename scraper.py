@@ -709,37 +709,8 @@ def get_job_count(
     easy_apply: bool = False,
     lang: str = "en",
 ) -> int:
-    if limit_jobs > 0:
-        return limit_jobs
-
-    try:
-        uri = INIT_URL + build_params(
-            keywords,
-            location,
-            time_range,
-            distance,
-            job_type,
-            place,
-            experience_level=experience_level,
-            sort_by=sort_by,
-            easy_apply=easy_apply,
-        )
-        jobs_state.log(f"Consultando: {uri}")
-        res = session.get(uri, headers=build_headers(lang), timeout=REQUEST_TIMEOUT)
-        soup = BeautifulSoup(res.text, "html.parser")
-
-        job_count_element = (
-            soup.find("span", {"class": "results-context-header__job-count"})
-            or soup.find("span", {"class": "results-context-header__new-jobs"})
-        )
-
-        if job_count_element:
-            raw_count = job_count_element.get_text(strip=True).replace(",", "").replace(".", "").replace("+", "")
-            return min(int(raw_count), 1000)
-        return 1000
-    except Exception as exc:
-        jobs_state.log(f"Erro ao obter contagem de vagas: {exc}")
-        return 1000
+    """Return configured job limit or LinkedIn cap when unlimited."""
+    return limit_jobs if limit_jobs > 0 else 1000
 
 
 def get_job_ids_per_page(

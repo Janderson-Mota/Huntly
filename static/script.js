@@ -114,8 +114,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const themeToggleBtn = document.getElementById("theme-toggle-btn");
   const themeIcon = document.getElementById("theme-icon");
   const STORAGE_KEYS = {
-    filters: "huntly_last_filters",
-    recentKeywords: "huntly_recent_keywords",
     seenJobs: "huntly_seen_jobs",
     lang: "huntly_lang",
     theme: "huntly_theme",
@@ -253,20 +251,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function saveCurrentFilters() {
-    const formData = new FormData(searchForm);
-    writeStorage(STORAGE_KEYS.filters, {
-      keywords: formData.get("keywords") || "",
-      country: countrySelect.value,
-      state: stateSelect.value,
-      city: cityInput.value,
-      job_max_date: formData.get("job_max_date") || "",
-      experience_level: formData.get("experience_level") || "",
-      place: formData.get("place") || "",
-      job_type: formData.get("job_type") || "",
-    });
-  }
-
   function initLocationCascade() {
     countrySelect.innerHTML = "";
     const worldwideOpt = document.createElement("option");
@@ -401,7 +385,6 @@ document.addEventListener("DOMContentLoaded", () => {
     searchForm.reset();
     initLocationCascade();
     quickFilterInput.value = "";
-    localStorage.removeItem(STORAGE_KEYS.filters);
     showFeedback("");
   }
 
@@ -437,7 +420,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     showFeedback("");
-    saveCurrentFilters();
 
     try {
       setSearching(true);
