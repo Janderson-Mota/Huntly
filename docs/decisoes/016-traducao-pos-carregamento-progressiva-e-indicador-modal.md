@@ -1,33 +1,37 @@
-# ADR 016 — Tradução Pós-Carregamento Progressiva e Indicador Discreto no Modal
+# ADR 016 — Tradução Pós-Carregamento em Lote Único, Fallback MyMemory e Indicador no Modal
 
 **Status:** Aceito  
 **Data:** 2026-11-21
 
 ## Contexto
 
-Durante a busca ativa, disparar requisições para `/translate` a cada atualização parcial de `pollResults()` gerava concorrência de rede e reconstruía todo `#results-grid` em bloco para 9 cards de uma só vez. Além disso, ao abrir o modal **"Ver detalhes"** (`openJobModal`) para uma vaga com descrição longa ainda não traduzida por completo, o usuário não recebia nenhum feedback discreto indicando que a tradução sob demanda estava em andamento.
+Nos testes manuais em ambiente local, duas falhas foram observadas quando o navegador disparava diversas chamadas seguidas a `POST /translate` após `GET /results?type=jobs`:
+
+1. **Disparos múltiplos e saturação upstream (`429`):** Dividir a página em sub-lotes de 3 cards + prefetch da página seguinte + re-disparos em trocas de página/aba gerava dezenas de chamadas simultâneas e múltiplas requisições concorrentes em `translator.py` contra `translate.googleapis.com`, levando ao retorno `HTTP 429 Too Many Requests` (`/sorry/index`).
+2. **Fallback silencioso e envenenamento de cache:** Quando o tradutor falhava, `translator.py` devolvia o texto original com `source_lang: None` e `was_translated: False` em `HTTP 200`, e `static/script.js` gravava essa resposta não traduzida em `translationCache` / `sessionStorage`, impedindo novas tentativas e deixando os cards no idioma original. Além disso, o lote máximo de `/translate` estava limitado a `20` itens frente às buscas de `25–50` vagas.
 
 ## Decisão
 
-1. **Renderização imediata na coleta e tradução somente pós-carregamento (`static/script.js`):**
-   - `renderFilteredResults()` agora recebe `{ skipTranslation = false }` e só invoca `ensureTranslations(pageItems, { mode: "preview" })` (e o prefetch silencioso da próxima página) quando `!skipTranslation && !isSearching`.
-   - Em `pollResults()`, estados terminais (`complete`, `progress === 100`, `stopped`, `error` ou `!data.is_searching`) chamam `setIdleState()` **antes** de `await fetchResults()`, garantindo que o término da busca dispare automaticamente a tradução em segundo plano; o mesmo ocorre em `stopSearch()` quando já existem cards carregados.
+1. **Requisição única em lote pós-busca e preservação em memória (`static/script.js`, `app.py`):**
+   - Elevado o limite de lote de `20` para `50` vagas em `/translate` (`app.py`) e em `MAX_BATCH_ITEMS` (`translator.py`).
+   - Removido o chunking em blocos de 3 e os gatilhos automáticos dentro de `renderFilteredResults()` e `prefetchTimeout`: agora o front-end dispara **1 única chamada `POST /translate`** em `mode=preview` após o término da busca (`pollResults()` / `stopSearch()`) ou ao trocar o idioma da página (`applyLanguage()`), cobrindo até 50 vagas coletadas nas duas abas (`Correspondentes` e `Talvez você goste`).
+   - Cada tradução válida (`isValidTranslationEntry`, exigindo `source_lang || was_translated`) passa a ser salva tanto em `localStorage` (`huntly_translations_cache_v4`, até 250 entradas) quanto diretamente no objeto da vaga em `searchResults` via `item._translations[lang]`. Trocar de aba, paginar ou aplicar filtros rápidos/exclusão lê do estado em memória com **zero** chamadas extras.
+   - Respostas de fallback em falha (`source_lang: null, was_translated: false`) nunca são gravadas no cache do navegador nem no back-end.
 
-2. **Micro-lotes progressivos com atualização pontual no DOM (`static/script.js`):**
-   - No modo `preview` dos cards, os itens pendentes da página visível são divididos em blocos de `CARD_TRANSLATION_CHUNK_SIZE = 3` despachados em paralelo via `_translateChunk()`.
-   - À medida que cada bloco retorna de `POST /translate`, o resultado é gravado no cache em memória + `sessionStorage` (`huntly_translations_cache_v3`) e os cards correspondentes são atualizados no próprio DOM por `updateCardElementInPlace()` (título, resumo e selo `.translated-badge`), recorrendo a `renderFilteredResults({ skipTranslation: true })` apenas quando há filtros instantâneos ativos (`#quick-filter-input` / `#exclude-filter-input`).
+2. **Fallback automático MyMemory + cooldown e cache persistente (`translator.py`):**
+   - Reduzido `TRANSLATE_WORKERS` de `8` para `4` para suavizar concorrência upstream.
+   - Adicionado cooldown global de 300s para Google `gtx` após `HTTP 429`/`403` e fallback automático para a API pública REST do MyMemory (`https://api.mymemory.translated.net/get`, com sub-chunks de até 450 caracteres e detecção heurística conservadora de idioma-fonte `_detect_source_language()`), mantendo compatibilidade com os mocks de `requests.post` na suíte de testes e fallback seguro para o texto original quando ambos os provedores falharem.
+   - Adicionada persistência leve do cache LRU em arquivo temporário (`huntly_translation_cache_v1.json`, desativada durante execuções `pytest`) para evitar re-traduções entre reinícios locais.
 
-3. **Indicador discreto sob demanda e fallback seguro no modal (`templates/index.html`, `static/styles.css`, `static/i18n.js`, `static/script.js`):**
-   - Adicionado `#modal-translating-indicator` com ponto pulsante discreto (`.modal-translating-dot`) entre os badges e o corpo da descrição no modal, estilizado via tokens de tema claro/escuro e traduzido nos 8 idiomas (`modalTranslating`).
-   - `openJobModal()` exibe a vaga e o texto disponível imediatamente, ativa `#modal-translating-indicator` somente quando `job.description` existe e ainda não possui tradução completa em cache (`!(cached && cached.is_full)`), atualiza modal e card ao receber `mode=full` e sempre oculta o indicador no bloco `finally` (ou em `closeModal()`), mantendo o texto original caso a tradução falhe.
+3. **Indicador discreto sob demanda no modal (`templates/index.html`, `static/styles.css`, `static/i18n.js`, `static/script.js`):**
+   - Ao abrir **Ver detalhes** (`openJobModal`), caso `job.description` exista e ainda não tenha `is_full: true` em cache, `#modal-translating-indicator` é exibido enquanto `POST /translate` (`mode=full`) traduz a descrição completa, atualizando modal e card e ocultando o indicador em `finally` / `closeModal()`.
 
 ## Alternativas Descartadas
 
-- **Traduzir dentro da thread do scraper antes de salvar em `SearchState`:** descartado pois acopla a coleta do LinkedIn à latência de um serviço externo de tradução e atrasa a exibição inicial dos cards.
-- **Usar um único lote de 9+ vagas por página e reconstruir todo `#results-grid`:** descartado porque atrasa a aparição dos primeiros cards traduzidos e causa reflow completo da grade.
-- **Bloquear a abertura do modal aguardando a tradução completa:** descartado para preservar abertura instantânea com indicador visual não intrusivo e fallback seguro para o texto original.
+- **Manter sub-lotes concorrentes por página e prefetch automático:** descartado por multiplicar chamadas simultâneas e provocar bloqueios `429` no tradutor gratuito.
+- **Persistir entradas sem tradução (`source_lang: null`) no cache do navegador:** descartado por cristalizar falhas temporárias e impedir tradução após recuperação.
 
 ## Consequências
 
-- **Positivas:** Cards aparecem instantaneamente após o scraping, traduzem progressivamente em segundo plano com reaproveitamento de cache (LRU no back-end e `sessionStorage` no navegador) e o modal oferece feedback claro nos 8 idiomas sem travar ou falhar em caso de indisponibilidade do tradutor.
-- **Negativas / Pontos de atenção:** Durante uma fração de segundo logo após o término do scraping, os títulos/resumos aparecem no idioma original da vaga até os blocos assíncronos de 3 cards responderem.
+- **Positivas:** Cada busca gera no máximo 1 chamada em lote `POST /translate` para os cards (e no máximo 1 chamada pontual sob demanda no modal para descrições longas), com atualização imediata dos cards em tela, preservação garantida ao trocar de aba/filtrar e resiliência automática via MyMemory quando Google limita requisições.
+- **Negativas / Pontos de atenção:** Em buscas de até 50 vagas com títulos/resumos inéditos em cold start via MyMemory, a única chamada em lote pode levar alguns segundos até retornar todos os cards de uma vez e atualizar a grade simultaneamente.
