@@ -336,6 +336,50 @@ _META_TO_TARGETS: Dict[str, set[str]] = {
 
 _TITLE_REQUIRED_TARGETS: set[str] = {"trainee", "tech_lead"}
 
+_EXP_SEARCH_TERMS_BY_LOCALE: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "pt": {
+        "internship": ("Estágio", "Internship"),
+        "trainee": ("Trainee",),
+        "entry_level": ("Júnior", "Junior"),
+        "mid": ("Pleno", "Mid Level"),
+        "senior": ("Sênior", "Senior"),
+        "tech_lead": ("Tech Lead", "Líder Técnico"),
+        "director": ("Diretor", "Head"),
+    },
+    "es": {
+        "internship": ("Prácticas", "Internship"),
+        "trainee": ("Trainee",),
+        "entry_level": ("Junior",),
+        "mid": ("Semi Senior", "Mid Level"),
+        "senior": ("Senior",),
+        "tech_lead": ("Tech Lead", "Líder Técnico"),
+        "director": ("Director", "Head"),
+    },
+    "en": {
+        "internship": ("Internship", "Intern"),
+        "trainee": ("Trainee",),
+        "entry_level": ("Junior",),
+        "mid": ("Mid Level",),
+        "senior": ("Senior",),
+        "tech_lead": ("Tech Lead", "Technical Lead"),
+        "director": ("Director", "Head"),
+    },
+}
+
+_TARGET_DEFAULT_EXP_TOKEN: Dict[str, str] = {
+    "internship": "1",
+    "trainee": "trainee",
+    "entry_level": "2",
+    "mid": "3,4",
+    "senior": "4",
+    "tech_lead": "tech_lead",
+    "director": "5,6",
+}
+
+_PT_SEARCH_COUNTRIES = {"Brazil", "Portugal"}
+_ES_SEARCH_COUNTRIES = {"Spain"}
+_ES_EXTRA_LOCATIONS = ("mexico", "argentina", "colombia", "chile", "peru", "uruguay", "ecuador", "espana")
+
 _NEGATED_WORK_MODE_RE = re.compile(
     r"\b(?:nao\s+e|nao\s+sera|not|no\s+es|non\s+e|pas)\s+(?:100%\s+)?(?:remot[oae]|h[ií]brid[oa]|hybrid|presencial|on[\s-]?site|remote)\b",
     re.IGNORECASE,
@@ -1081,6 +1125,153 @@ def _expand_experience_linkedin_codes(values: Optional[Union[str, List[str]]]) -
     return codes
 
 
+def _infer_search_locale(location: str = "", lang: str = "en") -> str:
+    """Infer preferred search term locale ('pt', 'es', 'en') from location and UI language."""
+    norm_lang = (lang or "en").strip().lower().split("-")[0]
+    fallback_locale = norm_lang if norm_lang in ("pt", "es", "en") else "en"
+
+    if location and location.strip():
+        _norm_loc, canonical_country, _ = normalize_location_for_linkedin(location)
+        if canonical_country in _PT_SEARCH_COUNTRIES:
+            return "pt"
+        if canonical_country in _ES_SEARCH_COUNTRIES:
+            return "es"
+        if canonical_country:
+            return "en"
+
+        raw_lower = location.lower()
+        norm_loc = _normalize_text(location)
+        for country_name, locale in (
+            ("Brazil", "pt"),
+            ("Portugal", "pt"),
+            ("Spain", "es"),
+            ("United States", "en"),
+            ("United Kingdom", "en"),
+            ("Canada", "en"),
+            ("Ireland", "en"),
+        ):
+            region_tokens = COUNTRY_REGION_TOKENS.get(country_name, ())
+            if any(_contains_token(norm_loc, raw_lower, tok) for tok in region_tokens):
+                return locale
+        if any(_contains_token(norm_loc, raw_lower, tok) for tok in _ES_EXTRA_LOCATIONS):
+            return "es"
+
+    return fallback_locale
+
+
+def _combine_keyword_with_term(keywords: str, term: str) -> str:
+    """Append an experience term to keywords without duplicating existing phrasing."""
+    cleaned_kw = (keywords or "").strip()
+    cleaned_term = (term or "").strip()
+    if not cleaned_term:
+        return cleaned_kw
+    if not cleaned_kw:
+        return cleaned_term
+
+    norm_kw = _normalize_text(cleaned_kw)
+    norm_term = _normalize_text(cleaned_term)
+    if re.search(rf"(?<!\w){re.escape(norm_term)}(?!\w)", norm_kw):
+        return cleaned_kw
+    return f"{cleaned_kw} {cleaned_term}"
+
+
+def _extract_ordered_experience_targets(
+    experience_level: Optional[Union[str, List[str]]],
+) -> Tuple[List[Tuple[str, List[str]]], List[str]]:
+    """Return ordered (target, [token]) pairs plus normalized original filter tokens."""
+    if not experience_level:
+        return [], []
+
+    raw_items = [experience_level] if isinstance(experience_level, str) else list(experience_level)
+    target_to_tokens: Dict[str, List[str]] = {}
+    ordered_targets: List[str] = []
+    original_tokens: List[str] = []
+
+    def _register(token: str) -> None:
+        if token not in original_tokens:
+            original_tokens.append(token)
+        for target in _EXP_TOKEN_TO_TARGETS.get(token, ()):
+            if target not in target_to_tokens:
+                target_to_tokens[target] = []
+                ordered_targets.append(target)
+            if token not in target_to_tokens[target]:
+                target_to_tokens[target].append(token)
+
+    for item in raw_items:
+        if item is None:
+            continue
+        raw = str(item).strip()
+        if not raw:
+            continue
+        if raw in _EXP_TOKEN_TO_TARGETS:
+            _register(raw)
+        else:
+            for part in raw.split(","):
+                tok = part.strip()
+                if tok in _EXP_TOKEN_TO_TARGETS:
+                    _register(tok)
+
+    paired = [
+        (target, target_to_tokens[target] or [_TARGET_DEFAULT_EXP_TOKEN[target]])
+        for target in ordered_targets
+    ]
+    return paired, original_tokens
+
+
+def build_experience_search_queries(
+    keywords: str,
+    experience_level: Optional[Union[str, List[str]]] = None,
+    location: str = "",
+    lang: str = "en",
+) -> List[Tuple[str, Optional[List[str]], bool]]:
+    """Build ordered (keywords, experience_tokens, is_primary) queries enriched with level terms."""
+    cleaned_kw = (keywords or "").strip()
+    ordered_targets, original_tokens = _extract_ordered_experience_targets(experience_level)
+    if not ordered_targets:
+        return [(cleaned_kw, None, True)]
+
+    locale = _infer_search_locale(location=location, lang=lang)
+    terms_by_target = _EXP_SEARCH_TERMS_BY_LOCALE.get(locale, _EXP_SEARCH_TERMS_BY_LOCALE["en"])
+    existing_kw_targets = detect_title_experience_levels(cleaned_kw)
+
+    primary_queries: List[Tuple[str, Optional[List[str]], bool]] = []
+    secondary_queries: List[Tuple[str, Optional[List[str]], bool]] = []
+
+    for target, target_tokens in ordered_targets:
+        terms = terms_by_target.get(target, ())
+        if not terms or target in existing_kw_targets:
+            primary_queries.append((cleaned_kw, target_tokens, True))
+        else:
+            primary_kw = _combine_keyword_with_term(cleaned_kw, terms[0])
+            primary_queries.append((primary_kw, target_tokens, True))
+            for alt_term in terms[1:]:
+                alt_kw = _combine_keyword_with_term(cleaned_kw, alt_term)
+                secondary_queries.append((alt_kw, target_tokens, False))
+
+        # LinkedIn frequently tags Tech Lead and Trainee roles as "Not applicable";
+        # keep an unfiltered f_E pass in reserve to catch them if Pass 1 needs more jobs.
+        if target in _TITLE_REQUIRED_TARGETS:
+            lead_term_list = terms if (terms and target not in existing_kw_targets) else ()
+            if lead_term_list:
+                secondary_queries.append((_combine_keyword_with_term(cleaned_kw, lead_term_list[0]), None, False))
+            elif cleaned_kw:
+                secondary_queries.append((cleaned_kw, None, False))
+
+    if original_tokens:
+        secondary_queries.append((cleaned_kw, original_tokens, False))
+
+    deduped: List[Tuple[str, Optional[List[str]], bool]] = []
+    seen_keys: set[Tuple[str, Tuple[str, ...]]] = set()
+    for q_kw, q_tokens, is_primary in primary_queries + secondary_queries:
+        key = (_normalize_text(q_kw), tuple(q_tokens or []))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append((q_kw, q_tokens, is_primary))
+
+    return deduped
+
+
 def build_params(
     keywords: str,
     location: str,
@@ -1401,9 +1592,21 @@ def search_jobs_thread(
                 status_code="statusCounting",
                 status_params={},
             )
+            effective_limit = (
+                max(MIN_LIMIT_JOBS, min(limit_jobs, MAX_LIMIT_JOBS))
+                if limit_jobs > 0
+                else MIN_LIMIT_JOBS
+            )
+            search_queries = build_experience_search_queries(
+                keywords,
+                experience_level=experience_level,
+                location=location,
+                lang=lang,
+            )
+            primary_kw = search_queries[0][0] if search_queries else keywords
             total_jobs = get_job_count(
                 session,
-                keywords,
+                primary_kw,
                 location,
                 time_range,
                 distance,
@@ -1415,62 +1618,100 @@ def search_jobs_thread(
                 easy_apply=easy_apply,
                 lang=lang,
             )
-            num_pages = max(1, math.ceil(total_jobs / PAGE_SIZE)) + (3 if canonical_country else 0)
             jobs_state.set_total(total_jobs, run_id=run_id)
-            jobs_state.log(f"Buscando até ~{total_jobs} vagas ({num_pages} páginas)", run_id=run_id)
 
-            effective_limit = (
-                max(MIN_LIMIT_JOBS, min(limit_jobs, MAX_LIMIT_JOBS))
-                if limit_jobs > 0
-                else MIN_LIMIT_JOBS
+            primary_count = max(1, sum(1 for _, _, is_primary in search_queries if is_primary))
+            per_primary_quota = (
+                max(1, math.ceil(effective_limit / primary_count))
+                if primary_count > 1
+                else effective_limit
+            )
+            jobs_state.log(
+                f"Buscando até ~{total_jobs} vagas ({len(search_queries)} consulta(s) direcionada(s))",
+                run_id=run_id,
             )
 
             job_ids: List[str] = []
             seen_ids: set[str] = set()
             summaries: Dict[str, Dict[str, Any]] = {}
-            start_offset = 0
-            for page in range(num_pages):
+
+            for q_idx, (q_keywords, q_exp_tokens, is_primary) in enumerate(search_queries):
+                if len(job_ids) >= effective_limit:
+                    break
                 if not jobs_state.is_run_active(run_id):
                     jobs_state.stop(run_id=run_id)
                     return
 
-                new_ids = get_job_ids_per_page(
-                    session,
-                    keywords,
-                    location,
-                    time_range,
-                    distance,
-                    job_type,
-                    place,
-                    start_offset,
-                    experience_level=experience_level,
-                    sort_by=sort_by,
-                    easy_apply=easy_apply,
-                    summaries_out=summaries,
-                    run_id=run_id,
-                    lang=lang,
+                remaining_total = effective_limit - len(job_ids)
+                query_quota = (
+                    min(remaining_total, per_primary_quota)
+                    if (primary_count > 1 and is_primary)
+                    else remaining_total
                 )
-                for jid in new_ids:
-                    if jid in seen_ids:
-                        continue
-                    seen_ids.add(jid)
-                    summary_loc = summaries.get(jid, {}).get("location")
-                    if canonical_country and summary_loc and not job_matches_country(summary_loc, canonical_country):
-                        continue
-                    job_ids.append(jid)
+                query_pages = max(1, math.ceil(query_quota / PAGE_SIZE)) + (3 if canonical_country else 0)
+                added_for_query = 0
+                start_offset = 0
 
-                progress = (page + 1) / num_pages * 50
-                jobs_state.update_progress(
-                    progress,
-                    f"Coletando páginas: {page + 1}/{num_pages} ({len(job_ids)} IDs)",
-                    run_id=run_id,
-                    status_code="statusCollectingPages",
-                    status_params={"page": page + 1, "pages": num_pages, "count": len(job_ids)},
-                )
-                if not new_ids or len(job_ids) >= effective_limit:
-                    break
-                start_offset += max(len(new_ids), PAGE_SIZE)
-                sleep(0.2)
+                for page in range(query_pages):
+                    if not jobs_state.is_run_active(run_id):
+                        jobs_state.stop(run_id=run_id)
+                        return
+
+                    new_ids = get_job_ids_per_page(
+                        session,
+                        q_keywords,
+                        location,
+                        time_range,
+                        distance,
+                        job_type,
+                        place,
+                        start_offset,
+                        experience_level=q_exp_tokens,
+                        sort_by=sort_by,
+                        easy_apply=easy_apply,
+                        summaries_out=summaries,
+                        run_id=run_id,
+                        lang=lang,
+                    )
+                    added_on_page = 0
+                    unseen_in_page = 0
+                    for jid in new_ids:
+                        if jid in seen_ids:
+                            continue
+                        seen_ids.add(jid)
+                        unseen_in_page += 1
+                        summary_loc = summaries.get(jid, {}).get("location")
+                        if canonical_country and summary_loc and not job_matches_country(summary_loc, canonical_country):
+                            continue
+                        job_ids.append(jid)
+                        added_on_page += 1
+                        added_for_query += 1
+                        if len(job_ids) >= effective_limit or added_for_query >= query_quota:
+                            break
+
+                    progress = min(
+                        50.0,
+                        max(
+                            ((q_idx + (page + 1) / query_pages) / max(1, len(search_queries))) * 50.0,
+                            (len(job_ids) / max(1, effective_limit)) * 50.0,
+                        ),
+                    )
+                    jobs_state.update_progress(
+                        progress,
+                        f"Coletando páginas: {page + 1}/{query_pages} ({len(job_ids)} IDs)",
+                        run_id=run_id,
+                        status_code="statusCollectingPages",
+                        status_params={"page": page + 1, "pages": query_pages, "count": len(job_ids)},
+                    )
+                    if (
+                        not new_ids
+                        or unseen_in_page == 0
+                        or len(job_ids) >= effective_limit
+                        or added_for_query >= query_quota
+                    ):
+                        break
+                    start_offset += max(len(new_ids), PAGE_SIZE)
+                    sleep(0.2)
 
             if not jobs_state.is_run_active(run_id):
                 jobs_state.stop(run_id=run_id)

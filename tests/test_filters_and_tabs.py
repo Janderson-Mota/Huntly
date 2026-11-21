@@ -8,6 +8,7 @@ import pytest
 from app import DEFAULT_LIMIT_JOBS, MAX_LIMIT_JOBS, MIN_LIMIT_JOBS, UNLIMITED_JOBS_CAP, app
 from scraper import (
     UNLIMITED_JOBS_CAP as SCRAPER_UNLIMITED_CAP,
+    build_experience_search_queries,
     build_params,
     classify_job_match,
     detect_title_experience_levels,
@@ -639,6 +640,112 @@ def test_home_renders_minimalist_footer(client):
     footer_end = html.index("</footer>", footer_start)
     footer_html = html[footer_start:footer_end]
     assert "<a " not in footer_html
+
+
+def test_build_experience_search_queries_enriches_php_intern_tech_lead_and_multilevel():
+    # PT/Brazil: PHP + Estágio -> PHP Estágio primary, PHP Internship secondary, fallback PHP
+    q_pt_intern = build_experience_search_queries("PHP", ["1"], location="Brazil", lang="pt")
+    assert q_pt_intern[0] == ("PHP Estágio", ["1"], True)
+    assert ("PHP Internship", ["1"], False) in q_pt_intern
+    assert ("PHP", ["1"], False) in q_pt_intern
+
+    # US / English: PHP + Estágio -> PHP Internship primary
+    q_us_intern = build_experience_search_queries("PHP", ["1"], location="United States", lang="pt")
+    assert q_us_intern[0] == ("PHP Internship", ["1"], True)
+
+    # Tech Lead: injects Tech Lead / Líder Técnico / Technical Lead + includes None fallback for Not Applicable
+    q_pt_lead = build_experience_search_queries("PHP", ["tech_lead"], location="Brazil", lang="pt")
+    assert q_pt_lead[0] == ("PHP Tech Lead", ["tech_lead"], True)
+    assert ("PHP Líder Técnico", ["tech_lead"], False) in q_pt_lead
+    assert ("PHP Tech Lead", None, False) in q_pt_lead
+
+    q_us_lead = build_experience_search_queries("PHP", ["tech_lead"], location="United States", lang="en")
+    assert q_us_lead[0] == ("PHP Tech Lead", ["tech_lead"], True)
+    assert ("PHP Technical Lead", ["tech_lead"], False) in q_us_lead
+
+    # Never duplicate level keyword if already typed by the user
+    q_already_intern = build_experience_search_queries("Estágio PHP", ["1"], location="Brazil", lang="pt")
+    assert q_already_intern[0] == ("Estágio PHP", ["1"], True)
+    assert all(kw == "Estágio PHP" for kw, _, _ in q_already_intern)
+
+    q_already_lead = build_experience_search_queries("Tech Lead Python", ["tech_lead"], location="Brazil", lang="pt")
+    assert q_already_lead[0] == ("Tech Lead Python", ["tech_lead"], True)
+
+    # Empty keyword with filter selected uses level term directly
+    q_empty_kw = build_experience_search_queries("", ["1"], location="Brazil", lang="pt")
+    assert q_empty_kw[0] == ("Estágio", ["1"], True)
+
+    # Multi-level splits into separate targeted primary queries instead of impossible AND strings
+    q_multi = build_experience_search_queries("PHP", ["1", "2"], location="Brazil", lang="pt")
+    primaries = [q for q in q_multi if q[2] is True]
+    assert primaries == [("PHP Estágio", ["1"], True), ("PHP Júnior", ["2"], True)]
+
+
+def test_search_jobs_thread_uses_enriched_queries_and_balanced_multilevel_cap():
+    seen_calls = []
+
+    def fake_get_job_ids(_session, kw, *_args, **kwargs):
+        exp = kwargs.get("experience_level")
+        seen_calls.append((kw, list(exp) if exp else None))
+        if kw == "PHP Estágio":
+            return [f"intern_{i}" for i in range(15)]
+        if kw == "PHP Júnior":
+            return [f"jr_{i}" for i in range(15)]
+        return [f"extra_{i}" for i in range(10)]
+
+    def fake_detail(_session, job_id, _summary=None, run_id=None, lang="en"):
+        if job_id.startswith("intern_"):
+            return {
+                "id": job_id,
+                "title": "Estágio PHP",
+                "company": "Emp",
+                "location": "Brazil",
+                "time": "1 day ago",
+                "link": f"https://www.linkedin.com/jobs/view/{job_id}/",
+                "experience_level_code": "internship",
+                "description": "Vaga de estágio PHP",
+            }
+        return {
+            "id": job_id,
+            "title": "Desenvolvedor PHP Júnior",
+            "company": "Emp",
+            "location": "Brazil",
+            "time": "1 day ago",
+            "link": f"https://www.linkedin.com/jobs/view/{job_id}/",
+            "experience_level_code": "entry_level",
+            "description": "Vaga PHP Júnior",
+        }
+
+    with (
+        patch("scraper.get_job_count", return_value=25),
+        patch("scraper.get_job_ids_per_page", side_effect=fake_get_job_ids),
+        patch("scraper.get_job_detail", side_effect=fake_detail),
+    ):
+        search_jobs_thread(
+            keywords="PHP",
+            location="Brazil",
+            max_date="",
+            distance="",
+            job_type=[],
+            place=[],
+            limit_jobs=25,
+            experience_level=["1", "2"],
+            sort_by="R",
+            easy_apply=False,
+            already_started=False,
+            lang="pt",
+        )
+
+    assert seen_calls[0] == ("PHP Estágio", ["1"])
+    assert ("PHP Júnior", ["2"]) in seen_calls
+    results = jobs_state.get_results()
+    assert len(results) == 25
+    intern_count = sum(1 for r in results if r["id"].startswith("intern_"))
+    jr_count = sum(1 for r in results if r["id"].startswith("jr_"))
+    assert intern_count == 13
+    assert jr_count == 12
+    assert all(r["match_category"] == "matched" for r in results)
+
 
 
 
