@@ -1,9 +1,6 @@
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
-import html
 import os
-import queue
 import re
 import sqlite3
 import tempfile
@@ -11,9 +8,6 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 import unicodedata
-
-import requests
-from requests.adapters import HTTPAdapter
 
 
 TARGET_LANG_MAP: Dict[str, str] = {
@@ -24,34 +18,17 @@ TARGET_LANG_MAP: Dict[str, str] = {
     "it": "it",
     "de": "de",
     "ru": "ru",
-    "zh": "zh-CN",
+    "zh": "zh",
     "ja": "ja",
 }
 
 SUPPORTED_LANGS = set(TARGET_LANG_MAP.keys())
 
-TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
-MYMEMORY_URL = "https://api.mymemory.translated.net/get"
 MAX_CACHE_ENTRIES = 5000
 MAX_CHUNK_CHARS = 4500
-MYMEMORY_MAX_CHARS = 450
-PACKED_BLOCK_MAX_CHARS = 3600
-PACKED_BLOCK_MAX_ITEMS = 12
 PREVIEW_DESC_CHARS = 450
 MAX_BATCH_ITEMS = 50
-TRANSLATE_WORKERS = 10
-GOOGLE_COOLDOWN_SECONDS = 300.0
 _DEFAULT_CACHE_DB = os.path.join(tempfile.gettempdir(), "huntly_translation_cache.sqlite3")
-
-_ORIGINAL_REQUESTS_POST = requests.post
-_ORIGINAL_REQUESTS_GET = requests.get
-_session_pool: "queue.LifoQueue[requests.Session]" = queue.LifoQueue(maxsize=24)
-_google_lock = threading.Lock()
-_google_cooldown_until = 0.0
-_db_lock = threading.Lock()
-_configured_db_path: Optional[str] = None
-_initialized_dbs: Set[str] = set()
-_PACK_SEP_RE = re.compile(r"\[\[\[\s*HUNTLY_SEP_(\d+)\s*\]\]\]")
 
 _LATIN_STOPWORDS: Dict[str, Set[str]] = {
     "pt": {
@@ -103,37 +80,50 @@ _LANG_JOB_KEYWORDS: Dict[str, Set[str]] = {
     "pt": {
         "desenvolvedor", "desenvolvedora", "engenheiro", "engenheira", "estagio",
         "estagiario", "estagiaria", "analista", "tecnico", "tecnica", "pleno",
-        "senior", "junior", "gerente", "coordenador", "diretor", "arquiteto",
-        "dados", "sistemas", "requisitos", "responsabilidades", "beneficios",
-        "remoto", "hibrido", "presencial", "empresa", "candidatos", "salario",
+        "gerente", "coordenador", "diretor", "arquiteto", "dados", "sistemas",
+        "requisitos", "responsabilidades", "beneficios", "remoto", "hibrido",
+        "presencial", "empresa", "candidatos", "salario", "experiencia", "vagas",
     },
     "en": {
-        "developer", "engineer", "engineering", "software", "backend", "frontend",
-        "fullstack", "architect", "analyst", "manager", "intern", "internship",
-        "junior", "senior", "lead", "principal", "staff", "remote", "hybrid",
-        "onsite", "scalable", "building", "designing", "services", "team",
+        "developer", "engineer", "engineering", "software", "intern", "internship",
+        "lead", "manager", "architect", "architecture", "analyst", "principal",
+        "staff", "remote", "hybrid", "onsite", "scalable", "building", "designing",
+        "service", "services", "team", "seeking", "hiring", "role", "position",
+        "experience", "requirements", "responsibilities", "benefits", "skills",
     },
     "es": {
         "desarrollador", "desarrolladora", "ingeniero", "ingeniera", "practicas",
-        "becario", "analista", "tecnico", "puesto", "requisitos", "funciones",
-        "beneficios", "sueldo", "remoto", "hibrido", "presencial", "datos",
+        "becario", "puesto", "requisitos", "funciones", "beneficios", "sueldo",
+        "remoto", "hibrido", "presencial", "datos",
     },
     "fr": {
-        "developpeur", "ingenieur", "stage", "stagiaire", "poste", "missions",
-        "competences", "profil", "avantages", "teletravail", "hybride", "donnees",
+        "developpeur", "developpeuse", "ingenieur", "stage", "stagiaire", "poste",
+        "missions", "competences", "profil", "avantages", "teletravail",
+        "hybride", "donnees", "recherche",
     },
     "it": {
         "sviluppatore", "ingegnere", "tirocinio", "stage", "azienda", "requisiti",
         "competenze", "ruolo", "remoto", "ibrido", "dati",
     },
     "de": {
-        "entwickler", "ingenieur", "praktikum", "stelle", "aufgaben", "profil",
-        "vorteile", "erfahrung", "kenntnisse", "daten",
+        "entwickler", "entwicklerin", "ingenieur", "praktikum", "werkstudent",
+        "stelle", "aufgaben", "profil", "vorteile", "erfahrung", "kenntnisse", "daten",
     },
 }
 
 _cache: "OrderedDict[Tuple[str, str], Tuple[str, Optional[str]]]" = OrderedDict()
 _cache_lock = threading.Lock()
+_db_lock = threading.Lock()
+_configured_db_path: Optional[str] = None
+_initialized_dbs: Set[str] = set()
+
+_argos_lock = threading.Lock()
+_argos_languages_by_code: Optional[Dict[str, Any]] = None
+_argos_translators: Dict[Tuple[str, str], Any] = {}
+
+
+def _strip_accents(text: str) -> str:
+    return "".join(ch for ch in unicodedata.normalize("NFD", text) if unicodedata.category(ch) != "Mn")
 
 
 def _active_db_path() -> Optional[str]:
@@ -230,6 +220,14 @@ def _sqlite_batch_put(entries: List[Tuple[str, str, str, Optional[str]]]) -> Non
             return
 
 
+def reset_argos_cache() -> None:
+    """Clear cached Argos Translate language index and translator instances."""
+    global _argos_languages_by_code
+    with _argos_lock:
+        _argos_languages_by_code = None
+        _argos_translators.clear()
+
+
 def clear_memory_cache() -> None:
     """Clear only the in-memory LRU cache without deleting the persistent SQLite cache."""
     with _cache_lock:
@@ -237,11 +235,9 @@ def clear_memory_cache() -> None:
 
 
 def clear_cache() -> None:
-    """Clear the in-memory and persistent SQLite cache and reset upstream cooldown."""
-    global _google_cooldown_until
+    """Clear the in-memory, SQLite, and Argos model caches."""
     clear_memory_cache()
-    with _google_lock:
-        _google_cooldown_until = 0.0
+    reset_argos_cache()
     db_path = _active_db_path()
     if db_path and os.path.exists(db_path):
         with _db_lock:
@@ -278,19 +274,6 @@ def normalize_target_lang(code: Optional[str]) -> Optional[str]:
 def _make_cache_key(tl: str, text: str) -> Tuple[str, str]:
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return tl, digest
-
-
-def _normalize_lang_code(code: Optional[str]) -> Optional[str]:
-    if not code or not isinstance(code, str):
-        return None
-    clean = code.strip().lower().replace("_", "-")
-    if not clean or clean == "auto":
-        return None
-    if clean.startswith("zh"):
-        return "zh"
-    if clean == "jp" or clean == "ja" or clean.startswith("ja-"):
-        return "ja"
-    return clean.split("-")[0] or None
 
 
 def _cache_get(tl: str, text: str) -> Optional[Tuple[str, Optional[str]]]:
@@ -379,83 +362,8 @@ def _split_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> List[str]:
     return chunks
 
 
-def _build_pooled_session() -> requests.Session:
-    session = requests.Session()
-    adapter = HTTPAdapter(pool_connections=4, pool_maxsize=12)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
-
-
-def _get_pooled_session() -> requests.Session:
-    try:
-        return _session_pool.get_nowait()
-    except queue.Empty:
-        return _build_pooled_session()
-
-
-def _release_pooled_session(sess: requests.Session) -> None:
-    try:
-        _session_pool.put_nowait(sess)
-    except queue.Full:
-        sess.close()
-
-
-def _post_translation(chunk: str, tl: str, timeout: int) -> requests.Response:
-    request_kwargs: Dict[str, Any] = {
-        "params": {"client": "gtx", "sl": "auto", "tl": tl, "dt": "t"},
-        "data": {"q": chunk},
-        "headers": {"User-Agent": "Mozilla/5.0"},
-        "timeout": timeout,
-    }
-    # Preserve compatibility with unit tests patching translator.requests.post.
-    if requests.post is not _ORIGINAL_REQUESTS_POST:
-        return requests.post(TRANSLATE_URL, **request_kwargs)
-
-    sess = _get_pooled_session()
-    try:
-        return sess.post(TRANSLATE_URL, **request_kwargs)
-    finally:
-        _release_pooled_session(sess)
-
-
-def _get_mymemory(sub_chunk: str, src_code: str, tl: str, timeout: int) -> requests.Response:
-    params: Dict[str, str] = {"q": sub_chunk, "langpair": f"{src_code}|{tl}"}
-    email = os.environ.get("MYMEMORY_EMAIL", "").strip()
-    if email:
-        params["de"] = email
-    request_kwargs: Dict[str, Any] = {
-        "params": params,
-        "headers": {"User-Agent": "Mozilla/5.0"},
-        "timeout": timeout,
-    }
-    if requests.get is not _ORIGINAL_REQUESTS_GET:
-        return requests.get(MYMEMORY_URL, **request_kwargs)
-
-    sess = _get_pooled_session()
-    try:
-        return sess.get(MYMEMORY_URL, **request_kwargs)
-    finally:
-        _release_pooled_session(sess)
-
-
-def _google_in_cooldown() -> bool:
-    if requests.post is not _ORIGINAL_REQUESTS_POST:
-        return False
-    with _google_lock:
-        return time.monotonic() < _google_cooldown_until
-
-
-def _mark_google_rate_limited() -> None:
-    if requests.post is not _ORIGINAL_REQUESTS_POST:
-        return
-    with _google_lock:
-        global _google_cooldown_until
-        _google_cooldown_until = max(_google_cooldown_until, time.monotonic() + GOOGLE_COOLDOWN_SECONDS)
-
-
 def _is_already_target_language(text: str, target_lang: str) -> bool:
-    """Conservatively skip HTTP calls only for long texts clearly already in target_lang."""
+    """Conservatively skip translation only for long texts clearly already in target_lang."""
     if not text or len(text) < 120:
         return False
 
@@ -518,16 +426,53 @@ def _build_preview_snippet(text: str, max_chars: int = PREVIEW_DESC_CHARS) -> st
     return sliced.rstrip() or text[:max_chars]
 
 
-def _detect_source_language(text: str, target_lang: str) -> str:
-    """Heuristically infer source language for providers requiring an explicit langpair."""
-    if not text:
-        return "en" if target_lang != "en" else "pt"
+def _score_latin_languages(text: str) -> Dict[str, int]:
+    """Score Latin-script languages using diacritics, stopwords, and IT role terms."""
+    lower = text.lower()
+    scores: Dict[str, int] = {lang: 0 for lang in _LANG_JOB_KEYWORDS}
+    if any(ch in lower for ch in "ãõçêâô"):
+        scores["pt"] += 3
+    if "ñ" in lower or "¿" in lower or "¡" in lower:
+        scores["es"] += 3
+    if "ß" in lower or "ä" in lower or "ö" in lower or "ü" in lower:
+        scores["de"] += 2
+    if any(ch in lower for ch in "àèéìòù") and any(
+        tok in lower for tok in ("svilupp", "lavoro", "azienda", "di ", "per ")
+    ):
+        scores["it"] += 2
+    if any(ch in lower for ch in "éèêàçôù") and any(
+        tok in lower for tok in ("développ", "ingénieur", "poste", "chez", "avec")
+    ):
+        scores["fr"] += 3
+
+    norm_lower = _strip_accents(lower)
+    words = re.findall(r"[a-z]+", norm_lower)
+    for w in words:
+        for lang_code, sw_set in _LATIN_STOPWORDS.items():
+            if w in {_strip_accents(s) for s in sw_set}:
+                scores[lang_code] += 2
+        for lang_code, kw_set in _LANG_JOB_KEYWORDS.items():
+            if w in kw_set:
+                scores[lang_code] += 2
+    return scores
+
+
+def detect_source_language(
+    text: Optional[str],
+    target_lang: str = "en",
+    strict: bool = False,
+    hint: Optional[str] = None,
+) -> Optional[str]:
+    """Detect source ISO-639-1 language via script checks, diacritics, stopwords, and IT job terms."""
+    if not text or not text.strip():
+        return None if strict else (hint or ("en" if target_lang != "en" else "pt"))
 
     alpha_chars = [ch for ch in text if ch.isalpha()]
     if alpha_chars:
         cyrillic_chars = [ch for ch in alpha_chars if "\u0400" <= ch <= "\u04ff"]
         if len(cyrillic_chars) >= 3 and (len(cyrillic_chars) / len(alpha_chars)) >= 0.5:
             return "ru"
+
     non_punct = [ch for ch in text if ch.isalnum()]
     if non_punct:
         kana_chars = [ch for ch in non_punct if "\u3040" <= ch <= "\u30ff"]
@@ -537,214 +482,87 @@ def _detect_source_language(text: str, target_lang: str) -> str:
         if len(cjk_chars) >= 2 and (len(cjk_chars) / len(non_punct)) >= 0.4:
             return "zh"
 
-    lower = text.lower()
-    scores: Dict[str, int] = {lang: 0 for lang in _LANG_JOB_KEYWORDS}
-    if any(ch in lower for ch in "ãõçêâô"):
-        scores["pt"] += 3
-    if "ñ" in lower or "¿" in lower or "¡" in lower:
-        scores["es"] += 3
-    if "ß" in lower or "ä" in lower or "ö" in lower or "ü" in lower:
-        scores["de"] += 2
-    if any(ch in lower for ch in "àèéìòù") and any(tok in lower for tok in ("svilupp", "lavoro", "azienda", "di ", "per ")):
-        scores["it"] += 2
-    if any(ch in lower for ch in "éèêàçôù") and any(tok in lower for tok in ("développ", "ingénieur", "poste", "chez", "avec")):
-        scores["fr"] += 3
-
-    norm_lower = "".join(
-        ch for ch in unicodedata.normalize("NFD", lower) if unicodedata.category(ch) != "Mn"
-    )
-    words = re.findall(r"[a-z]+", norm_lower)
-    for w in words:
-        for lang_code, sw_set in _LATIN_STOPWORDS.items():
-            norm_sw = {
-                "".join(ch for ch in unicodedata.normalize("NFD", s) if unicodedata.category(ch) != "Mn")
-                for s in sw_set
-            }
-            if w in norm_sw:
-                scores[lang_code] += 2
-        for lang_code, kw_set in _LANG_JOB_KEYWORDS.items():
-            if w in kw_set:
-                scores[lang_code] += 2
-
-    best_lang, best_score = max(scores.items(), key=lambda kv: kv[1])
+    scores = _score_latin_languages(text)
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    best_lang, best_score = ranked[0]
     if best_score > 0:
+        # Avoid falsely treating mixed bilingual descriptions as purely target_lang.
+        if best_lang == target_lang and not strict:
+            for alt_lang, alt_score in ranked[1:]:
+                if alt_lang != target_lang and alt_score >= 6 and best_score < alt_score * 3:
+                    return alt_lang
         return best_lang
+    if strict:
+        return hint if (hint and hint in TARGET_LANG_MAP) else None
+    if hint and hint in TARGET_LANG_MAP:
+        return hint
     return "en" if target_lang != "en" else "pt"
 
 
-def _request_mymemory_translation(text: str, lang_key: str, timeout: int) -> Tuple[str, Optional[str]]:
-    src_lang = _detect_source_language(text, lang_key)
-    if src_lang == lang_key:
-        return text, lang_key
+def _get_argos_translation(from_code: str, to_code: str) -> Optional[Any]:
+    """Return a cached Argos Translate translator object (supporting automatic English pivot)."""
+    if not from_code or not to_code or from_code == to_code:
+        return None
+    pair = (from_code, to_code)
+    with _argos_lock:
+        if pair in _argos_translators:
+            return _argos_translators[pair]
 
-    src_code = TARGET_LANG_MAP.get(src_lang, "en")
-    tl_code = TARGET_LANG_MAP[lang_key]
-    sub_chunks = _split_chunks(text, MYMEMORY_MAX_CHARS)
+    try:
+        import argostranslate.translate as argos_translate
+    except ImportError:
+        return None
+
+    with _argos_lock:
+        if pair in _argos_translators:
+            return _argos_translators[pair]
+        if _argos_languages_by_code is None:
+            installed = argos_translate.get_installed_languages()
+            globals()["_argos_languages_by_code"] = {lang.code: lang for lang in installed}
+        lang_map = _argos_languages_by_code or {}
+        from_lang = lang_map.get(from_code)
+        to_lang = lang_map.get(to_code)
+        if not from_lang or not to_lang:
+            return None
+        translation_obj = from_lang.get_translation(to_lang)
+        if translation_obj is not None:
+            _argos_translators[pair] = translation_obj
+        return translation_obj
+
+
+def _translate_single_text_offline(
+    text: str, target_code: str, source_code: Optional[str] = None, hint: Optional[str] = None
+) -> Tuple[str, Optional[str], bool]:
+    """Translate text offline via Argos Translate. Returns (output_text, detected_src, ok)."""
+    detected_src = source_code or detect_source_language(text, target_code, strict=False, hint=hint)
+    if not detected_src:
+        return text, None, False
+    if detected_src == target_code:
+        return text, target_code, True
+
+    translator_obj = _get_argos_translation(detected_src, target_code)
+    if translator_obj is None:
+        return text, None, False
+
+    chunks = _split_chunks(text, MAX_CHUNK_CHARS)
     translated_parts: List[str] = []
-
-    for sub in sub_chunks:
-        res = _get_mymemory(sub, src_code, tl_code, timeout)
-        res.raise_for_status()
-        payload = res.json()
-        if not isinstance(payload, dict) or payload.get("quotaFinished"):
-            raise ValueError("MyMemory quota exhausted or invalid payload")
-        if int(payload.get("responseStatus") or 0) != 200:
-            raise ValueError(f"MyMemory error status: {payload.get('responseStatus')}")
-        raw_trans = (payload.get("responseData") or {}).get("translatedText")
-        if not isinstance(raw_trans, str) or not raw_trans.strip():
-            raise ValueError("Empty MyMemory translation")
-        cleaned = html.unescape(raw_trans).strip()
-        upper = cleaned.upper()
-        if upper.startswith("MYMEMORY WARNING") or "INVALID LANGUAGE PAIR" in upper:
-            raise ValueError(f"MyMemory warning payload: {cleaned}")
-        translated_parts.append(cleaned)
+    for ch in chunks:
+        out_chunk = translator_obj.translate(ch)
+        if not isinstance(out_chunk, str) or not out_chunk.strip():
+            return text, None, False
+        translated_parts.append(out_chunk)
 
     joined = translated_parts[0] if len(translated_parts) == 1 else "\n\n".join(translated_parts)
-    return joined, src_lang
+    return joined, detected_src, True
 
 
-def _request_google_chunk(chunk: str, tl: str, timeout: int) -> Tuple[str, Optional[str]]:
-    res = _post_translation(chunk, tl, timeout)
-    if getattr(res, "status_code", None) in (429, 403):
-        _mark_google_rate_limited()
-    res.raise_for_status()
-    payload = res.json()
-    if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
-        raise ValueError("Unexpected translation payload structure")
-    translated = "".join(part[0] for part in payload[0] if isinstance(part, list) and part and part[0])
-    if not translated:
-        raise ValueError("Empty translation returned")
-    detected_src = _normalize_lang_code(payload[2]) if len(payload) > 2 else None
-    return translated, detected_src
-
-
-def _request_libretranslate(text: str, lang_key: str, timeout: int) -> Tuple[str, Optional[str]]:
-    base_url = os.environ.get("LIBRETRANSLATE_URL", "").strip().rstrip("/")
-    if not base_url:
-        raise RuntimeError("LibreTranslate URL not configured")
-    src_lang = _detect_source_language(text, lang_key)
-    tl_code = TARGET_LANG_MAP[lang_key]
-    body: Dict[str, Any] = {
-        "q": text,
-        "source": TARGET_LANG_MAP.get(src_lang, "auto"),
-        "target": "zh" if tl_code == "zh-CN" else tl_code,
-        "format": "text",
-    }
-    api_key = os.environ.get("LIBRETRANSLATE_API_KEY", "").strip()
-    if api_key:
-        body["api_key"] = api_key
-    res = requests.post(f"{base_url}/translate", json=body, timeout=timeout)
-    res.raise_for_status()
-    payload = res.json()
-    translated = payload.get("translatedText") if isinstance(payload, dict) else None
-    if not isinstance(translated, str) or not translated.strip():
-        raise ValueError("Empty LibreTranslate output")
-    return translated.strip(), src_lang
-
-
-def _request_chunk_translation(chunk: str, tl: str, timeout: int) -> Tuple[str, Optional[str]]:
-    lang_key = normalize_target_lang(tl) or _normalize_lang_code(tl) or "en"
-    allow_mymemory = (requests.post is _ORIGINAL_REQUESTS_POST) or (requests.get is not _ORIGINAL_REQUESTS_GET)
-
-    if not _google_in_cooldown():
-        try:
-            return _request_google_chunk(chunk, tl, timeout)
-        except requests.HTTPError as exc:
-            status = getattr(exc.response, "status_code", None)
-            if status in (429, 403):
-                _mark_google_rate_limited()
-            if not allow_mymemory:
-                raise
-        except Exception:
-            if not allow_mymemory:
-                raise
-
-    if allow_mymemory:
-        try:
-            return _request_mymemory_translation(chunk, lang_key, timeout)
-        except Exception:
-            if os.environ.get("LIBRETRANSLATE_URL", "").strip():
-                return _request_libretranslate(chunk, lang_key, timeout)
-            raise
-
-    raise RuntimeError("Upstream translation unavailable")
-
-
-def _translate_google_packed_blocks(
-    items: List[str], tl: str, timeout: int = 8
+def _translate_texts_with_argos(
+    texts: List[str],
+    lang_key: str,
+    text_hints: Optional[Dict[str, Optional[str]]] = None,
+    forced_source: Optional[str] = None,
 ) -> Dict[str, Tuple[str, Optional[str]]]:
-    """Pack multiple short texts using indexed markers to minimize upstream HTTP roundtrips."""
-    if not items:
-        return {}
-
-    blocks: List[Tuple[List[str], str]] = []
-    cur_items: List[str] = []
-    cur_parts: List[str] = []
-    cur_len = 0
-
-    for raw in items:
-        idx = len(cur_items)
-        marker = f"[[[HUNTLY_SEP_{idx}]]]"
-        addition = f"\n{marker}\n{raw}" if cur_items else f"{marker}\n{raw}"
-        if cur_items and (
-            len(cur_items) >= PACKED_BLOCK_MAX_ITEMS or cur_len + len(addition) > PACKED_BLOCK_MAX_CHARS
-        ):
-            blocks.append((cur_items, "".join(cur_parts)))
-            cur_items = []
-            cur_parts = []
-            cur_len = 0
-            idx = 0
-            marker = f"[[[HUNTLY_SEP_{idx}]]]"
-            addition = f"{marker}\n{raw}"
-        cur_items.append(raw)
-        cur_parts.append(addition)
-        cur_len += len(addition)
-
-    if cur_items:
-        blocks.append((cur_items, "".join(cur_parts)))
-
-    def _run_block(block_tuple: Tuple[List[str], str]) -> Dict[str, Tuple[str, Optional[str]]]:
-        block_items, packed_payload = block_tuple
-        try:
-            translated_blob, detected_src = _request_google_chunk(packed_payload, tl, timeout)
-        except requests.HTTPError as exc:
-            status = getattr(exc.response, "status_code", None)
-            if status in (429, 403):
-                _mark_google_rate_limited()
-            return {}
-        except Exception:
-            return {}
-
-        matches = list(_PACK_SEP_RE.finditer(translated_blob))
-        if len(matches) != len(block_items):
-            return {}
-        parsed: Dict[str, Tuple[str, Optional[str]]] = {}
-        for pos, m in enumerate(matches):
-            if int(m.group(1)) != pos:
-                return {}
-            start_idx = m.end()
-            end_idx = matches[pos + 1].start() if pos + 1 < len(matches) else len(translated_blob)
-            seg = translated_blob[start_idx:end_idx].strip()
-            if not seg:
-                return {}
-            parsed[block_items[pos]] = (seg, detected_src)
-        return parsed
-
-    resolved: Dict[str, Tuple[str, Optional[str]]] = {}
-    if len(blocks) == 1:
-        resolved.update(_run_block(blocks[0]))
-    else:
-        workers = min(TRANSLATE_WORKERS, len(blocks))
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            for block_out in executor.map(_run_block, blocks):
-                resolved.update(block_out)
-    return resolved
-
-
-def _translate_texts_parallel(
-    texts: List[str], lang_key: str, timeout: int = 8
-) -> Dict[str, Tuple[str, Optional[str]]]:
-    """Translate unique non-empty strings using RAM + SQLite cache, packed blocks and 10-worker pool."""
+    """Translate unique non-empty strings using RAM + SQLite cache and local Argos models."""
     tl = TARGET_LANG_MAP[lang_key]
     resolved: Dict[str, Tuple[str, Optional[str]]] = {}
     uncached_candidates: List[str] = []
@@ -770,91 +588,37 @@ def _translate_texts_parallel(
 
         uncached_candidates.append(raw)
 
-    # 1. Batch lookup against persistent SQLite cache before making any external HTTP calls
+    # Batch lookup in persistent SQLite cache before running neural translation
     if uncached_candidates:
         digest_to_raw = {_make_cache_key(tl, raw)[1]: raw for raw in uncached_candidates}
         sqlite_hits = _sqlite_batch_get(tl, list(digest_to_raw.keys()))
-        remaining_after_sqlite: List[str] = []
+        remaining: List[str] = []
         for dig, raw in digest_to_raw.items():
             hit = sqlite_hits.get(dig)
             if hit is not None:
                 _cache_put(tl, raw, hit[0], hit[1])
                 resolved[raw] = hit
             else:
-                remaining_after_sqlite.append(raw)
-        uncached_candidates = remaining_after_sqlite
+                remaining.append(raw)
+        uncached_candidates = remaining
 
-    # 2. Try packed delimiter blocks when running live Google gtx with multiple short texts
-    if (
-        len(uncached_candidates) > 1
-        and requests.post is _ORIGINAL_REQUESTS_POST
-        and not _google_in_cooldown()
-    ):
-        packable = [t for t in uncached_candidates if len(t) <= MAX_CHUNK_CHARS and "HUNTLY_SEP_" not in t]
-        if len(packable) > 1:
-            packed_hits = _translate_google_packed_blocks(packable, tl, timeout=timeout)
-            if packed_hits:
-                for raw, (tr_text, src_lang) in packed_hits.items():
-                    _cache_put(tl, raw, tr_text, src_lang)
-                    _, dig = _make_cache_key(tl, raw)
-                    sqlite_rows_to_save.append((tl, dig, tr_text, src_lang))
-                    resolved[raw] = (tr_text, src_lang)
-                uncached_candidates = [t for t in uncached_candidates if t not in packed_hits]
-
-    # 3. Parallel chunk translation via ThreadPoolExecutor(max_workers=10) for remaining texts
-    pending_chunks_by_text: Dict[str, List[str]] = {}
-    unique_chunks: List[str] = []
-    seen_chunks: Set[str] = set()
     for raw in uncached_candidates:
-        chunks = _split_chunks(raw, MAX_CHUNK_CHARS)
-        pending_chunks_by_text[raw] = chunks
-        for ch in chunks:
-            if ch not in seen_chunks:
-                seen_chunks.add(ch)
-                unique_chunks.append(ch)
-
-    chunk_results: Dict[str, Optional[Tuple[str, Optional[str]]]] = {}
-    if len(unique_chunks) == 1:
-        ch = unique_chunks[0]
+        hint = text_hints.get(raw) if text_hints else None
         try:
-            chunk_results[ch] = _request_chunk_translation(ch, tl, timeout)
-        except Exception:
-            chunk_results[ch] = None
-    elif len(unique_chunks) > 1:
-        def _fetch_chunk(chunk_text: str) -> Tuple[str, Optional[Tuple[str, Optional[str]]]]:
-            try:
-                return chunk_text, _request_chunk_translation(chunk_text, tl, timeout)
-            except Exception:
-                return chunk_text, None
-
-        workers = min(TRANSLATE_WORKERS, len(unique_chunks))
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            for chunk_text, outcome in executor.map(_fetch_chunk, unique_chunks):
-                chunk_results[chunk_text] = outcome
-
-    for raw, chunks in pending_chunks_by_text.items():
-        translated_parts: List[str] = []
-        source_lang: Optional[str] = None
-        failed = False
-        for ch in chunks:
-            outcome = chunk_results.get(ch)
-            if outcome is None:
-                failed = True
-                break
-            part_translated, part_src = outcome
-            translated_parts.append(part_translated)
-            if source_lang is None and part_src:
-                source_lang = part_src
-        if failed:
-            resolved[raw] = (raw, None)
-        else:
-            translated = (
-                translated_parts[0] if len(translated_parts) == 1 else "\n\n".join(translated_parts)
+            translated, src_lang, ok = _translate_single_text_offline(
+                raw, tl, source_code=forced_source, hint=hint
             )
-            _cache_put(tl, raw, translated, source_lang)
-            _, dig = _make_cache_key(tl, raw)
-            sqlite_rows_to_save.append((tl, dig, translated, source_lang))
-            resolved[raw] = (translated, source_lang)
+        except Exception:
+            translated, src_lang, ok = raw, None, False
+
+        if not ok or src_lang is None:
+            resolved[raw] = (raw, None)
+            continue
+
+        _cache_put(tl, raw, translated, src_lang)
+        _, dig = _make_cache_key(tl, raw)
+        sqlite_rows_to_save.append((tl, dig, translated, src_lang))
+        resolved[raw] = (translated, src_lang)
 
     if sqlite_rows_to_save:
         _sqlite_batch_put(sqlite_rows_to_save)
@@ -863,9 +627,13 @@ def _translate_texts_parallel(
 
 
 def translate_text_with_meta(
-    text: Optional[str], target_lang: str, timeout: int = 8
+    text: Optional[str],
+    target_lang: str,
+    source_lang: Optional[str] = None,
+    timeout: int = 8,
 ) -> Tuple[Optional[str], Optional[str]]:
-    """Translate text into target_lang returning (translated_text, detected_source_lang)."""
+    """Translate text locally via Argos returning (translated_text, detected_source_lang)."""
+    _ = timeout
     if not text or not text.strip():
         return text, None
 
@@ -873,13 +641,18 @@ def translate_text_with_meta(
     if not lang_key or lang_key not in TARGET_LANG_MAP:
         return text, None
 
-    resolved = _translate_texts_parallel([text], lang_key, timeout=timeout)
+    src_key = normalize_target_lang(source_lang) if source_lang else None
+    resolved = _translate_texts_with_argos([text], lang_key, forced_source=src_key)
     return resolved.get(text, (text, None))
 
 
-def translate_text(text: Optional[str], target_lang: str, timeout: int = 8) -> Optional[str]:
-    """Translate text into target_lang using an LRU cache, falling back to original text on any failure."""
-    translated, _ = translate_text_with_meta(text, target_lang, timeout=timeout)
+def translate_text(
+    text: Optional[str], target_lang: str, source_lang: Optional[str] = None, timeout: int = 8
+) -> Optional[str]:
+    """Translate text locally into target_lang using cache and safe original fallback."""
+    translated, _ = translate_text_with_meta(
+        text, target_lang, source_lang=source_lang, timeout=timeout
+    )
     return translated
 
 
@@ -888,8 +661,18 @@ def _translate_single_job(item: Dict[str, Any], target_lang: str) -> Tuple[str, 
     raw_title = item.get("title")
     raw_desc = item.get("description")
 
-    texts = [t for t in (raw_title, raw_desc) if isinstance(t, str) and t.strip()]
-    translated_map = _translate_texts_parallel(texts, target_lang)
+    combined_sample = " ".join(
+        t for t in (raw_title, raw_desc) if isinstance(t, str) and t.strip()
+    )
+    job_hint = detect_source_language(combined_sample, target_lang, strict=True)
+    text_hints: Dict[str, Optional[str]] = {}
+    texts: List[str] = []
+    for t in (raw_title, raw_desc):
+        if isinstance(t, str) and t.strip():
+            texts.append(t)
+            text_hints[t] = job_hint
+
+    translated_map = _translate_texts_with_argos(texts, target_lang, text_hints=text_hints)
 
     title_out, title_src = (
         translated_map.get(raw_title, (raw_title, None)) if isinstance(raw_title, str) else (raw_title, None)
@@ -916,8 +699,8 @@ def _translate_single_job(item: Dict[str, Any], target_lang: str) -> Tuple[str, 
 def translate_jobs_batch(
     items: List[Dict[str, Any]], target_lang: str, mode: str = "full"
 ) -> Dict[str, Dict[str, Any]]:
-    """Translate titles and descriptions (preview snippet or full) for up to MAX_BATCH_ITEMS jobs in parallel."""
-    lang_key = _normalize_lang_code(target_lang)
+    """Translate titles and descriptions (preview snippet or full) offline for up to MAX_BATCH_ITEMS jobs."""
+    lang_key = normalize_target_lang(target_lang)
     if not lang_key or lang_key not in TARGET_LANG_MAP:
         return {}
 
@@ -928,6 +711,7 @@ def translate_jobs_batch(
     effective_mode = "preview" if mode == "preview" else "full"
     prepared: List[Tuple[str, Any, Optional[str], bool]] = []
     batch_texts: List[str] = []
+    text_hints: Dict[str, Optional[str]] = {}
 
     for item in valid_items:
         job_id = str(item.get("id", ""))
@@ -940,13 +724,26 @@ def translate_jobs_batch(
             target_desc = raw_desc if isinstance(raw_desc, str) else None
             is_full = True
 
+        combined_sample = " ".join(
+            t for t in (raw_title, target_desc) if isinstance(t, str) and t.strip()
+        )
+        job_hint = detect_source_language(combined_sample, lang_key, strict=True)
+
         prepared.append((job_id, raw_title, target_desc, is_full))
         if isinstance(raw_title, str) and raw_title.strip():
             batch_texts.append(raw_title)
+            if raw_title not in text_hints and job_hint:
+                text_hints[raw_title] = job_hint
         if isinstance(target_desc, str) and target_desc.strip():
             batch_texts.append(target_desc)
+            if target_desc not in text_hints and job_hint:
+                text_hints[target_desc] = job_hint
 
-    translated_map = _translate_texts_parallel(batch_texts, lang_key) if batch_texts else {}
+    translated_map = (
+        _translate_texts_with_argos(batch_texts, lang_key, text_hints=text_hints)
+        if batch_texts
+        else {}
+    )
 
     results: Dict[str, Dict[str, Any]] = {}
     for job_id, raw_title, target_desc, is_full in prepared:

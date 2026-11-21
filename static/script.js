@@ -236,7 +236,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const ITEMS_PER_PAGE = 9;
   const MAX_BATCH_TRANSLATE_ITEMS = 50;
-  const PERSISTED_TRANSLATIONS_KEY = "huntly_translations_cache_v4";
+  const PERSISTED_TRANSLATIONS_KEY = "huntly_translations_cache_v5";
   const MAX_PERSISTED_TRANSLATIONS = 250;
   let isSearching = false;
   let searchResults = [];

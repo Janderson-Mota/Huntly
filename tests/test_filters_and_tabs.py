@@ -417,26 +417,22 @@ def test_translate_jobs_to_pt_and_source_meta(client):
 
     translator.clear_cache()
 
-    class FakeResp:
-        def raise_for_status(self):
-            return None
+    class FakeArgosTranslator:
+        def __init__(self, prefix):
+            self.prefix = prefix
 
-        def json(self):
-            return [[["Desenvolvedor Python Sênior", "Senior Python Developer"]], None, "en"]
+        def translate(self, text):
+            return f"{self.prefix}{text}"
 
-    class FakeSameResp:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return [[["Desenvolvedor Python Pleno", "Desenvolvedor Python Pleno"]], None, "pt"]
-
-    with patch("translator.requests.post", return_value=FakeResp()):
+    with patch(
+        "translator._get_argos_translation",
+        side_effect=lambda src, dst: FakeArgosTranslator(f"[{dst.upper()}] ") if src == "en" else None,
+    ):
         batch = translator.translate_jobs_batch(
             [{"id": "901", "title": "Senior Python Developer", "description": "Senior Python Developer"}],
             "pt",
         )
-        assert batch["901"]["title"] == "Desenvolvedor Python Sênior"
+        assert batch["901"]["title"] == "[PT] Senior Python Developer"
         assert batch["901"]["source_lang"] == "en"
         assert batch["901"]["target_lang"] == "pt"
         assert batch["901"]["was_translated"] is True
@@ -452,13 +448,13 @@ def test_translate_jobs_to_pt_and_source_meta(client):
         assert payload["translations"]["901"]["source_lang"] == "en"
 
     translator.clear_cache()
-    with patch("translator.requests.post", return_value=FakeSameResp()):
-        batch_same = translator.translate_jobs_batch(
-            [{"id": "902", "title": "Desenvolvedor Python Pleno", "description": "Desenvolvedor Python Pleno"}],
-            "pt",
-        )
-        assert batch_same["902"]["source_lang"] == "pt"
-        assert batch_same["902"]["was_translated"] is False
+    batch_same = translator.translate_jobs_batch(
+        [{"id": "902", "title": "Desenvolvedor Python Pleno", "description": "Desenvolvedor Python Pleno"}],
+        "pt",
+    )
+    assert batch_same["902"]["source_lang"] == "pt"
+    assert batch_same["902"]["was_translated"] is False
+    assert batch_same["902"]["title"] == "Desenvolvedor Python Pleno"
 
 
 def test_translate_preview_mode_and_full_mode_contract(client):
@@ -467,25 +463,16 @@ def test_translate_preview_mode_and_full_mode_contract(client):
     translator.clear_cache()
     sent_texts = []
 
-    class EchoTranslateResp:
-        def __init__(self, text):
-            self.text = text
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return [[[f"[PT] {self.text}", self.text]], None, "en"]
-
-    def fake_post(url, params=None, data=None, headers=None, timeout=8):
-        sent_texts.append(data["q"])
-        return EchoTranslateResp(data["q"])
+    class RecordingArgosTranslator:
+        def translate(self, text):
+            sent_texts.append(text)
+            return f"[PT] {text}"
 
     long_desc = " ".join(["Python backend service architecture experience"] * 25)
     assert len(long_desc) > translator.PREVIEW_DESC_CHARS
     short_desc = "Remote backend Python role."
 
-    with patch("translator.requests.post", side_effect=fake_post):
+    with patch("translator._get_argos_translation", return_value=RecordingArgosTranslator()):
         preview_batch = translator.translate_jobs_batch(
             [
                 {"id": "910", "title": "Backend Engineer", "description": long_desc},
@@ -531,19 +518,10 @@ def test_translate_deduplicates_identical_texts_and_skips_obvious_same_lang():
     translator.clear_cache()
     calls = []
 
-    class FakeResp:
-        def __init__(self, text):
-            self.text = text
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return [[[f"[PT] {self.text}", self.text]], None, "en"]
-
-    def fake_post(url, params=None, data=None, headers=None, timeout=8):
-        calls.append(data["q"])
-        return FakeResp(data["q"])
+    class RecordingArgosTranslator:
+        def translate(self, text):
+            calls.append(text)
+            return f"[PT] {text}"
 
     long_pt_desc = (
         "Buscamos profissional com experiência em desenvolvimento backend Python, Docker e AWS. "
@@ -559,7 +537,7 @@ def test_translate_deduplicates_identical_texts_and_skips_obvious_same_lang():
         "We are looking for a strong backend engineer with Python experience and cloud architecture skills."
     )
 
-    with patch("translator.requests.post", side_effect=fake_post):
+    with patch("translator._get_argos_translation", return_value=RecordingArgosTranslator()):
         # Deduplicates identical title across multiple jobs & skips long clear-PT description
         batch = translator.translate_jobs_batch(
             [
@@ -573,9 +551,9 @@ def test_translate_deduplicates_identical_texts_and_skips_obvious_same_lang():
         assert batch["920"]["title"] == "[PT] Senior Backend Engineer"
         assert batch["921"]["title"] == "[PT] Senior Backend Engineer"
         assert batch["920"]["description"] == long_pt_desc
-        assert batch["920"]["source_lang"] == "en" or batch["920"]["source_lang"] == "pt"
+        assert batch["920"]["source_lang"] in ("en", "pt")
 
-        # Verify pure same-lang skips with zero HTTP calls for BOTH title+desc or desc-only
+        # Verify pure same-lang skips with zero Argos calls
         calls.clear()
         out_pt, src_pt = translator.translate_text_with_meta(long_pt_desc, "pt")
         assert calls == []
@@ -836,21 +814,12 @@ def test_translate_endpoint_post_load_batch_cache_and_safe_fallback(client):
 
     calls = []
 
-    class FakeResp:
-        def __init__(self, text):
-            self.text = text
+    class FakeArgosTranslator:
+        def translate(self, text):
+            calls.append(text)
+            return f"[PT] {text}"
 
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return [[[f"[PT] {self.text}", self.text]], None, "en"]
-
-    def fake_post(url, params=None, data=None, headers=None, timeout=8):
-        calls.append(data["q"])
-        return FakeResp(data["q"])
-
-    with patch("translator.requests.post", side_effect=fake_post):
+    with patch("translator._get_argos_translation", return_value=FakeArgosTranslator()):
         first = client.post("/translate", json={"lang": "pt", "mode": "preview", "job_ids": ["950", "951"]})
         assert first.status_code == 200
         first_data = first.get_json()
@@ -861,16 +830,16 @@ def test_translate_endpoint_post_load_batch_cache_and_safe_fallback(client):
         assert first_data["translations"]["951"]["title"] == "[PT] Frontend Engineer"
         assert len(calls) == 4
 
-        # Second identical batch hits backend LRU cache with zero HTTP calls
+        # Second identical batch hits backend LRU cache with zero Argos calls
         calls.clear()
         second = client.post("/translate", json={"lang": "pt", "mode": "preview", "job_ids": ["950", "951"]})
         assert second.status_code == 200
         assert second.get_json() == first_data
         assert calls == []
 
-    # Network failure during on-demand full modal translation falls back safely without poisoning cache
+    # Missing package / runtime failure during modal full translation falls back safely without poisoning cache
     translator.clear_cache()
-    with patch("translator.requests.post", side_effect=RuntimeError("translation upstream timeout")):
+    with patch("translator._get_argos_translation", return_value=None):
         fallback = client.post("/translate", json={"lang": "pt", "mode": "full", "job_ids": ["951"]})
         assert fallback.status_code == 200
         fb_data = fallback.get_json()
@@ -881,78 +850,6 @@ def test_translate_endpoint_post_load_batch_cache_and_safe_fallback(client):
         assert translator.cache_size() == 0
 
 
-def test_translate_single_batch_up_to_50_and_mymemory_fallback_on_429(client):
-    import requests
-    import translator
-
-    translator.clear_cache()
-
-    batch_jobs = [
-        {
-            "id": str(1000 + idx),
-            "title": f"Backend Engineer {idx}",
-            "description": f"Build APIs in Python and Docker #{idx}",
-        }
-        for idx in range(25)
-    ]
-    jobs_state.set_results(batch_jobs)
-
-    class RateLimitedResp:
-        status_code = 429
-
-        def raise_for_status(self):
-            raise requests.HTTPError("429 Too Many Requests", response=self)
-
-    mm_calls = []
-
-    class MyMemoryResp:
-        status_code = 200
-
-        def __init__(self, q):
-            self.q = q
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "responseStatus": 200,
-                "quotaFinished": False,
-                "responseData": {"translatedText": f"[MM-PT] {self.q}"},
-            }
-
-    def fake_get(url, params=None, headers=None, timeout=8):
-        mm_calls.append((url, params))
-        return MyMemoryResp(params["q"])
-
-    with (
-        patch("translator.requests.post", return_value=RateLimitedResp()),
-        patch("translator.requests.get", side_effect=fake_get),
-    ):
-        res = client.post(
-            "/translate",
-            json={"lang": "pt", "mode": "preview", "job_ids": [j["id"] for j in batch_jobs]},
-        )
-        assert res.status_code == 200
-        payload = res.get_json()
-        assert len(payload["translations"]) == 25
-        assert payload["translations"]["1000"]["title"] == "[MM-PT] Backend Engineer 0"
-        assert payload["translations"]["1024"]["excerpt"] == "[MM-PT] Build APIs in Python and Docker #24"
-        assert payload["translations"]["1000"]["was_translated"] is True
-        assert payload["translations"]["1000"]["source_lang"] == "en"
-        assert len(mm_calls) == 50
-
-        # Second call uses cache cleanly without hitting MyMemory or Google again
-        mm_calls.clear()
-        cached_res = client.post(
-            "/translate",
-            json={"lang": "pt", "mode": "preview", "job_ids": [j["id"] for j in batch_jobs]},
-        )
-        assert cached_res.status_code == 200
-        assert cached_res.get_json() == payload
-        assert mm_calls == []
-
-
 def test_translate_all_supported_languages_and_code_normalization(client):
     import translator
 
@@ -961,22 +858,15 @@ def test_translate_all_supported_languages_and_code_normalization(client):
         [{"id": "1100", "title": "Senior Backend Engineer", "description": "Remote role"}]
     )
 
-    seen_tl = []
+    seen_targets = []
 
-    class MultiLangResp:
-        def __init__(self, tl, text):
-            self.tl = tl
-            self.text = text
+    class MultiLangArgos:
+        def __init__(self, dst):
+            self.dst = dst
 
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return [[[f"[{self.tl}] {self.text}", self.text]], None, "en"]
-
-    def fake_post(url, params=None, data=None, headers=None, timeout=8):
-        seen_tl.append(params["tl"])
-        return MultiLangResp(params["tl"], data["q"])
+        def translate(self, text):
+            seen_targets.append(self.dst)
+            return f"[{self.dst}] {text}"
 
     expected_map = [
         ("pt", "pt"),
@@ -986,30 +876,46 @@ def test_translate_all_supported_languages_and_code_normalization(client):
         ("it", "it"),
         ("de", "de"),
         ("ru", "ru"),
-        ("zh", "zh-CN"),
-        ("zh-CN", "zh-CN"),
+        ("zh", "zh"),
+        ("zh-CN", "zh"),
         ("ja", "ja"),
         ("pt-BR", "pt"),
     ]
 
-    with patch("translator.requests.post", side_effect=fake_post):
+    with patch(
+        "translator._get_argos_translation",
+        side_effect=lambda _src, dst: MultiLangArgos(dst),
+    ):
         for req_code, expected_tl in expected_map:
-            seen_tl.clear()
+            seen_targets.clear()
             translator.clear_cache()
             res = client.post("/translate", json={"lang": req_code, "mode": "preview", "job_ids": ["1100"]})
             assert res.status_code == 200, f"Failed for {req_code}: {res.get_json()}"
             payload = res.get_json()
-            assert seen_tl == [expected_tl, expected_tl]
-            assert payload["translations"]["1100"]["title"] == f"[{expected_tl}] Senior Backend Engineer"
-            assert payload["translations"]["1100"]["description"] == f"[{expected_tl}] Remote role"
+            if expected_tl == "en":
+                # Source text is already English -> skipped without invoking Argos
+                assert seen_targets == []
+                assert payload["translations"]["1100"]["title"] == "Senior Backend Engineer"
+                assert payload["translations"]["1100"]["was_translated"] is False
+            else:
+                assert seen_targets == [expected_tl, expected_tl]
+                assert payload["translations"]["1100"]["title"] == f"[{expected_tl}] Senior Backend Engineer"
+                assert payload["translations"]["1100"]["description"] == f"[{expected_tl}] Remote role"
 
     invalid = client.post("/translate", json={"lang": "xx-invalid", "job_ids": ["1100"]})
     assert invalid.status_code == 400
     assert invalid.get_json()["error_code"] == "errInvalidLanguage"
 
 
-def test_translate_parallel_workers_speed_and_sqlite_persistent_cache(tmp_path, client):
+def test_translate_single_batch_sqlite_persistent_cache_and_pivot_real_offline(tmp_path, client):
     import translator
+    from scripts.setup_translation import build_required_pairs
+
+    # Verify idempotent pivot pair builder produces bidirectional en<->X (14 pairs for 7 UI langs)
+    pairs_7 = build_required_pairs(["pt", "es", "fr", "it", "de", "ja", "zh"])
+    assert len(pairs_7) == 14
+    assert ("en", "pt") in pairs_7 and ("pt", "en") in pairs_7
+    assert ("pt", "de") not in pairs_7
 
     db_file = str(tmp_path / "test_translation_cache.sqlite3")
     translator.configure_cache_db(db_file)
@@ -1018,81 +924,58 @@ def test_translate_parallel_workers_speed_and_sqlite_persistent_cache(tmp_path, 
         jobs = [
             {
                 "id": str(1200 + idx),
-                "title": f"Role Title {idx}",
-                "description": f"Role Description {idx}",
+                "title": f"Backend Engineer {idx}",
+                "description": f"Build Python services {idx}",
             }
-            for idx in range(20)
+            for idx in range(25)
         ]
         jobs_state.set_results(jobs)
-        calls = []
+        argos_calls = []
 
-        class TimedResp:
-            def __init__(self, text):
-                self.text = text
+        class RecordingArgos:
+            def translate(self, text):
+                argos_calls.append(text)
+                return f"[DE] {text}"
 
-            def raise_for_status(self):
-                return None
-
-            def json(self):
-                return [[[f"[DE] {self.text}", self.text]], None, "en"]
-
-        def fake_post(url, params=None, data=None, headers=None, timeout=8):
-            calls.append(data["q"])
-            time.sleep(0.06)
-            return TimedResp(data["q"])
-
-        # 40 unique texts * 0.06s sequential = 2.4s; with 10 parallel workers <= ~0.24s + overhead
-        t0 = time.perf_counter()
-        with patch("translator.requests.post", side_effect=fake_post):
+        with patch("translator._get_argos_translation", return_value=RecordingArgos()):
             res = client.post(
                 "/translate",
                 json={"lang": "de", "mode": "preview", "job_ids": [j["id"] for j in jobs]},
             )
-        elapsed = time.perf_counter() - t0
-        assert res.status_code == 200
-        assert len(calls) == 40
-        assert elapsed < 1.0, f"Expected parallel speedup (< 1.0s), got {elapsed:.2f}s"
-        data = res.get_json()
-        assert data["translations"]["1200"]["title"] == "[DE] Role Title 0"
-        assert data["translations"]["1219"]["description"] == "[DE] Role Description 19"
+            assert res.status_code == 200
+            data = res.get_json()
+            assert len(data["translations"]) == 25
+            assert len(argos_calls) == 50
+            assert data["translations"]["1200"]["title"] == "[DE] Backend Engineer 0"
+            assert data["translations"]["1224"]["excerpt"] == "[DE] Build Python services 24"
 
-        # Evict RAM cache while preserving SQLite DB: reload must hit SQLite with 0 HTTP calls
+        # Evict RAM cache while preserving SQLite DB: reload must hit SQLite with 0 Argos calls
         translator.clear_memory_cache()
         assert translator.cache_size() == 0
-        calls.clear()
-        with patch("translator.requests.post", side_effect=fake_post):
+        with patch("translator._get_argos_translation", side_effect=AssertionError("Must hit SQLite cache")):
             res_sqlite = client.post(
                 "/translate",
                 json={"lang": "de", "mode": "preview", "job_ids": [j["id"] for j in jobs]},
             )
         assert res_sqlite.status_code == 200
         assert res_sqlite.get_json() == data
-        assert calls == []
+
+        # Real offline end-to-end Argos Translate verification (direct en->pt + automatic en pivot pt->de / pt->ja)
+        translator.clear_cache()
+        direct_out, direct_src = translator.translate_text_with_meta("Senior PHP Developer", "pt")
+        assert direct_src == "en"
+        assert direct_out != "Senior PHP Developer"
+
+        pivot_de, pivot_src = translator.translate_text_with_meta("Desenvolvedor Backend Python", "de")
+        assert pivot_src == "pt"
+        assert pivot_de != "Desenvolvedor Backend Python"
+
+        pivot_ja, _ = translator.translate_text_with_meta("Desenvolvedor Backend Python", "ja")
+        assert any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" for ch in pivot_ja)
     finally:
         translator.clear_cache()
         translator.configure_cache_db(None)
 
-
-def test_translate_packed_blocks_helper_and_fallback():
-    import translator
-
-    texts = ["Senior Backend Engineer", "Frontend React Developer", "Tech Lead PHP"]
-    packed_reply = (
-        "[[[HUNTLY_SEP_0]]]\nEngenheiro Backend Sênior\n"
-        "[[[HUNTLY_SEP_1]]]\nDesenvolvedor React Frontend\n"
-        "[[[HUNTLY_SEP_2]]]\nLíder Técnico PHP"
-    )
-    with patch("translator._request_google_chunk", return_value=(packed_reply, "en")) as mock_chunk:
-        out = translator._translate_google_packed_blocks(texts, "pt")
-        assert mock_chunk.call_count == 1
-        assert out["Senior Backend Engineer"] == ("Engenheiro Backend Sênior", "en")
-        assert out["Frontend React Developer"] == ("Desenvolvedor React Frontend", "en")
-        assert out["Tech Lead PHP"] == ("Líder Técnico PHP", "en")
-
-    # Corrupted delimiter count returns empty dict so caller falls back to per-item parallel requests
-    with patch("translator._request_google_chunk", return_value=("broken reply without markers", "en")):
-        out_bad = translator._translate_google_packed_blocks(texts, "pt")
-        assert out_bad == {}
 
 
 
