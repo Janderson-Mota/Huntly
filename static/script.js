@@ -167,6 +167,17 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  const LANG_FLAGS = {
+    pt: "🇧🇷",
+    en: "🇺🇸",
+    es: "🇪🇸",
+    fr: "🇫🇷",
+    it: "🇮🇹",
+    de: "🇩🇪",
+    ru: "🇷🇺",
+    zh: "🇨🇳",
+  };
+
   function applyLanguage(lang) {
     if (!I18N[lang]) return;
     currentLang = lang;
@@ -174,7 +185,15 @@ document.addEventListener("DOMContentLoaded", () => {
     document.documentElement.lang = lang === "pt" ? "pt-BR" : lang;
     document.title = t("pageTitle");
 
-    if (langSelect) langSelect.value = lang;
+    if (langSelect) {
+      const langNamesMap = I18N[lang]?.langNames || I18N.pt?.langNames || {};
+      Array.from(langSelect.options || []).forEach((opt) => {
+        const flag = LANG_FLAGS[opt.value] || "";
+        const label = langNamesMap[opt.value] || I18N.pt?.langNames?.[opt.value] || opt.value;
+        opt.textContent = flag ? `${flag} ${label}` : label;
+      });
+      langSelect.value = lang;
+    }
 
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       el.textContent = t(el.dataset.i18n);

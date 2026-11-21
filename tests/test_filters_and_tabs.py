@@ -368,8 +368,13 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       if ('labelEasyApply' in i18n[l] || 'limit75' in i18n[l] || 'limitUnlimited' in i18n[l]) {
         throw new Error('Obsolete filter/limit key present in ' + l);
       }
-      if (!i18n[l].langNames || typeof i18n[l].langNames !== 'object' || !i18n[l].langNames.en || !i18n[l].langNames.pt) {
+      if (!i18n[l].langNames || typeof i18n[l].langNames !== 'object') {
         throw new Error('Missing langNames map in ' + l);
+      }
+      for (const code of ['pt', 'en', 'es', 'fr', 'it', 'de', 'ru', 'zh']) {
+        if (!i18n[l].langNames[code] || typeof i18n[l].langNames[code] !== 'string') {
+          throw new Error('Missing langNames.' + code + ' in ' + l);
+        }
       }
     }
     const errors = [];
@@ -634,6 +639,9 @@ def test_home_renders_minimalist_footer(client):
     html = res.data.decode("utf-8")
     assert 'class="navbar-nav"' in html
     assert 'class="navbar-controls"' in html
+    assert '🇺🇸 Inglês' in html
+    assert '🇪🇸 Espanhol' in html
+    assert '🇨🇳 Chinês' in html
     assert 'id="modal-translating-indicator"' in html
     assert 'data-i18n="modalTranslating"' in html
     assert 'bi-arrow-counterclockwise' not in html
