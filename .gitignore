@@ -25,3 +25,7 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Local agent configs and internal docs
+.agents/
+docs/
+

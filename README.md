@@ -74,10 +74,7 @@ huntly/
 │   ├── i18n.js         # Dicionários completos nos 8 idiomas (incluindo 51 sugestões de cargos)
 │   ├── script.js       # Estado da UI, polling otimizado, modal, paginação, lote único/cache de tradução e i18n
 │   └── styles.css      # Estilos, dropdown multi-select, abas, rodapé e breakpoints (640px, 960px, 1120px+)
-├── tests/              # Suíte de testes unitários (pytest)
-└── docs/
-    ├── analise/        # Relatórios de auditoria (@auditor e @frontend) e prints de referência
-    └── decisoes/       # Registros de Decisão Arquitetural (ADRs 001 a 018)
+└── tests/              # Suíte de testes unitários (pytest)
 ```
 
 ## Rotas HTTP
