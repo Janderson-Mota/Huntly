@@ -211,7 +211,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const ITEMS_PER_PAGE = 9;
-  const SESSION_TRANSLATIONS_KEY = "huntly_translations_cache";
+  const SESSION_TRANSLATIONS_KEY = "huntly_translations_cache_v2";
   const MAX_SESSION_TRANSLATIONS = 200;
   let isSearching = false;
   let searchResults = [];
@@ -254,18 +254,21 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getDisplayJob(job) {
-    if (!job || currentLang === "pt" || !job.id) return job;
+    if (!job || !job.id) return job;
     const cached = translationCache.get(`${currentLang}:${job.id}`);
     if (!cached) return job;
     return {
       ...job,
       title: cached.title || job.title,
       description: cached.description || job.description,
+      source_lang: cached.source_lang || null,
+      target_lang: cached.target_lang || currentLang,
+      was_translated: Boolean(cached.was_translated),
     };
   }
 
   async function ensureTranslations(jobsToTranslate) {
-    if (currentLang === "pt" || !Array.isArray(jobsToTranslate) || !jobsToTranslate.length) {
+    if (!Array.isArray(jobsToTranslate) || !jobsToTranslate.length) {
       return;
     }
     const targetLang = currentLang;
@@ -303,6 +306,9 @@ document.addEventListener("DOMContentLoaded", () => {
           translationCache.set(cacheKey, {
             title: translated.title || "",
             description: translated.description || "",
+            source_lang: translated.source_lang || null,
+            target_lang: translated.target_lang || targetLang,
+            was_translated: Boolean(translated.was_translated),
           });
           updated = true;
         }
@@ -1193,6 +1199,23 @@ document.addEventListener("DOMContentLoaded", () => {
     return normalized;
   }
 
+  function formatLangName(code) {
+    if (!code) return "";
+    const norm = String(code).trim().toLowerCase().split("-")[0];
+    const map = I18N[currentLang]?.langNames || I18N.pt?.langNames || {};
+    return map[norm] || norm.toUpperCase();
+  }
+
+  function formatTranslationBadge(displayJob) {
+    if (!displayJob || !displayJob.was_translated || !displayJob.source_lang) return "";
+    const targetCode = displayJob.target_lang || currentLang;
+    if (displayJob.source_lang === targetCode) return "";
+    return t("translatedFromTo", {
+      from: formatLangName(displayJob.source_lang),
+      to: formatLangName(targetCode),
+    });
+  }
+
   function createJobCard(job, index = 0, isSeen = false) {
     const displayJob = getDisplayJob(job);
     const card = document.createElement("article");
@@ -1240,6 +1263,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const formattedTime = formatRelativeTime(job.time);
     const experienceLevel = translateExperienceLevel(job);
     const workModeLabel = translateWorkMode(job);
+    const translationBadgeText = formatTranslationBadge(displayJob);
     if (job.location) badges.appendChild(createMetaBadge("bi bi-geo-alt", job.location));
     if (workModeLabel) {
       badges.appendChild(createMetaBadge(job.work_mode_code === "onsite" ? "bi bi-building" : "bi bi-laptop", workModeLabel));
@@ -1247,6 +1271,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (formattedTime) badges.appendChild(createMetaBadge("bi bi-clock", formattedTime));
     if (experienceLevel) {
       badges.appendChild(createMetaBadge("bi bi-bar-chart", experienceLevel));
+    }
+    if (translationBadgeText) {
+      const trBadge = createMetaBadge("bi bi-translate", translationBadgeText);
+      trBadge.classList.add("translated-badge");
+      badges.appendChild(trBadge);
     }
 
     top.append(kickerRow, header);
@@ -1295,6 +1324,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const experienceLevel = translateExperienceLevel(job);
     const employmentType = translateEmploymentType(job);
     const workModeLabel = translateWorkMode(job);
+    const translationBadgeText = formatTranslationBadge(displayJob);
     if (job.location) modalBadges.appendChild(createMetaBadge("bi bi-geo-alt", job.location));
     if (workModeLabel) {
       modalBadges.appendChild(createMetaBadge(job.work_mode_code === "onsite" ? "bi bi-building" : "bi bi-laptop", workModeLabel));
@@ -1305,6 +1335,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (employmentType) {
       modalBadges.appendChild(createMetaBadge("bi bi-briefcase", employmentType));
+    }
+    if (translationBadgeText) {
+      const trBadge = createMetaBadge("bi bi-translate", translationBadgeText);
+      trBadge.classList.add("translated-badge");
+      modalBadges.appendChild(trBadge);
     }
 
     modalDescription.textContent = displayJob.description || t("modalNoDesc");

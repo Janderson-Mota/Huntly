@@ -346,11 +346,15 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       'ariaResultsTabs', 'tabMatched', 'tabRecommended',
       'emptyTabMatchedTitle', 'emptyTabMatchedDesc',
       'emptyTabRecommendedTitle', 'emptyTabRecommendedDesc',
-      'labelLimitJobs', 'limit25', 'limit50', 'limit75', 'limitUnlimited'
+      'labelLimitJobs', 'limit25', 'limit50', 'limit75', 'limitUnlimited',
+      'translatedFromTo'
     ];
     for (const l of langs) {
       if ('labelEasyApply' in i18n[l]) {
         throw new Error('Obsolete labelEasyApply present in ' + l);
+      }
+      if (!i18n[l].langNames || typeof i18n[l].langNames !== 'object' || !i18n[l].langNames.en || !i18n[l].langNames.pt) {
+        throw new Error('Missing langNames map in ' + l);
       }
     }
     const errors = [];
@@ -374,3 +378,53 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
     out = json.loads(proc.stdout)
     assert out["langs"] == ["pt", "en", "es", "fr", "it", "de", "ru", "zh"]
     assert out["errors"] == []
+
+
+def test_translate_jobs_to_pt_and_source_meta(client):
+    import translator
+
+    translator.clear_cache()
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[["Desenvolvedor Python Sênior", "Senior Python Developer"]], None, "en"]
+
+    class FakeSameResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[["Desenvolvedor Python Pleno", "Desenvolvedor Python Pleno"]], None, "pt"]
+
+    with patch("translator.requests.post", return_value=FakeResp()):
+        batch = translator.translate_jobs_batch(
+            [{"id": "901", "title": "Senior Python Developer", "description": "Senior Python Developer"}],
+            "pt",
+        )
+        assert batch["901"]["title"] == "Desenvolvedor Python Sênior"
+        assert batch["901"]["source_lang"] == "en"
+        assert batch["901"]["target_lang"] == "pt"
+        assert batch["901"]["was_translated"] is True
+
+        jobs_state.set_results(
+            [{"id": "901", "title": "Senior Python Developer", "description": "Senior Python Developer"}]
+        )
+        res = client.post("/translate", json={"lang": "pt", "job_ids": ["901"]})
+        assert res.status_code == 200
+        payload = res.get_json()
+        assert payload["lang"] == "pt"
+        assert payload["translations"]["901"]["was_translated"] is True
+        assert payload["translations"]["901"]["source_lang"] == "en"
+
+    translator.clear_cache()
+    with patch("translator.requests.post", return_value=FakeSameResp()):
+        batch_same = translator.translate_jobs_batch(
+            [{"id": "902", "title": "Desenvolvedor Python Pleno", "description": "Desenvolvedor Python Pleno"}],
+            "pt",
+        )
+        assert batch_same["902"]["source_lang"] == "pt"
+        assert batch_same["902"]["was_translated"] is False
+

@@ -324,9 +324,6 @@ def translate_job_cards():
         if lang not in SUPPORTED_LANGS:
             return jsonify({"error": "Idioma não suportado.", "error_code": "errInvalidLanguage"}), 400
 
-        if lang == "pt":
-            return jsonify({"lang": "pt", "translations": {}}), 200
-
         job_ids = _parse_str_list(params.get("job_ids"))[:20]
         target_items: List[Dict[str, Any]] = []
         if job_ids:
