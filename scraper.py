@@ -30,6 +30,7 @@ DEFAULT_HEADERS = {
 MAX_RETRIES = 3
 REQUEST_TIMEOUT = 20
 DETAIL_WORKERS = 2
+PAGE_SIZE = 10
 
 COUNTRY_ALIASES: Dict[str, str] = {
     "brasil": "Brazil",
@@ -499,7 +500,7 @@ def build_params(
 
     if keywords:
         cleaned = keywords.strip()
-        cleaned = cleaned.replace("jr", "junior").replace("Jr", "Junior")
+        cleaned = re.sub(r"\bjr\.?\b", "junior", cleaned, flags=re.IGNORECASE)
         params.append(("keywords", cleaned))
 
     if location:
@@ -623,15 +624,9 @@ def get_job_ids_per_page(
                 sleep(2)
                 continue
 
+            ids, summaries = _parse_page_jobs(res.text)
             if summaries_out is not None:
-                summaries_out.update(_parse_job_summaries(res.text))
-
-            soup = BeautifulSoup(res.text, "html.parser")
-            ids: List[str] = []
-            for li in soup.find_all("li"):
-                div = li.find("div")
-                if div and div.has_attr("data-entity-urn"):
-                    ids.append(str(div["data-entity-urn"]).split(":")[-1])
+                summaries_out.update(summaries)
             return ids
 
         except requests.RequestException as exc:
@@ -654,14 +649,17 @@ def _sanitize_job_url(raw_href: str, job_id: str) -> str:
     return fallback
 
 
-def _parse_job_summaries(html: str) -> Dict[str, Dict[str, Any]]:
+def _parse_page_jobs(html: str) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+    """Parse job IDs and card summaries from a LinkedIn search page in a single pass."""
     soup = BeautifulSoup(html, "html.parser")
+    ids: List[str] = []
     summaries: Dict[str, Dict[str, Any]] = {}
     for li in soup.find_all("li"):
         div = li.find("div")
         if not div or not div.has_attr("data-entity-urn"):
             continue
         job_id = str(div["data-entity-urn"]).split(":")[-1]
+        ids.append(job_id)
         link_el = li.find("a", {"class": "base-card__full-link"})
         title_el = li.find("h3", {"class": "base-search-card__title"})
         company_el = li.find("h4", {"class": "base-search-card__subtitle"})
@@ -679,7 +677,21 @@ def _parse_job_summaries(html: str) -> Dict[str, Dict[str, Any]]:
             "time": time_el.get_text(strip=True) if time_el else None,
             "link": clean_href,
         }
-    return summaries
+    return ids, summaries
+
+
+def _parse_job_summaries(html: str) -> Dict[str, Dict[str, Any]]:
+    return _parse_page_jobs(html)[1]
+
+
+def _extract_description_text(soup: BeautifulSoup) -> Optional[str]:
+    """Extract job description preserving paragraph/list line breaks."""
+    el = soup.find("div", {"class": "show-more-less-html__markup"})
+    if not el:
+        return None
+    raw = el.get_text(separator="\n", strip=True)
+    cleaned = re.sub(r"\n{3,}", "\n\n", raw).strip()
+    return cleaned or None
 
 
 def get_job_detail(
@@ -713,7 +725,7 @@ def get_job_detail(
                 "company": text_of("a", "topcard__org-name-link") or base.get("company"),
                 "location": text_of("span", "topcard__flavor--bullet") or base.get("location"),
                 "link": base.get("link") or f"{PUBLIC_JOB_URL}{job_id}/",
-                "description": text_of("div", "show-more-less-html__markup"),
+                "description": _extract_description_text(soup),
                 "time": text_of("span", "posted-time-ago__text") or base.get("time"),
             }
 
@@ -725,11 +737,13 @@ def get_job_detail(
 
             return detail
         except Exception as exc:
-            if attempt == 1 or not fallback:
-                jobs_state.log(f"Falha na vaga {job_id}: {exc}")
-                if fallback and fallback.get("title"):
-                    return fallback
-                return {"id": job_id, "error": str(exc)}
+            if attempt == 0:
+                sleep(1.5)
+                continue
+            jobs_state.log(f"Falha na vaga {job_id}: {exc}")
+            if fallback and fallback.get("title"):
+                return fallback
+            return {"id": job_id, "error": str(exc)}
     return fallback or {"id": job_id, "error": "Falha ao obter detalhes"}
 
 
@@ -768,13 +782,14 @@ def search_jobs_thread(
                 sort_by=sort_by,
                 easy_apply=easy_apply,
             )
-            num_pages = max(1, math.ceil(total_jobs / 25))
+            num_pages = max(1, math.ceil(total_jobs / PAGE_SIZE)) + (3 if canonical_country else 0)
             jobs_state.set_total(total_jobs)
             jobs_state.log(f"Buscando até ~{total_jobs} vagas ({num_pages} páginas)")
 
             job_ids: List[str] = []
             seen_ids: set[str] = set()
             summaries: Dict[str, Dict[str, Any]] = {}
+            start_offset = 0
             for page in range(num_pages):
                 if not jobs_state.is_searching:
                     jobs_state.stop()
@@ -788,7 +803,7 @@ def search_jobs_thread(
                     distance,
                     job_type,
                     place,
-                    page * 25,
+                    start_offset,
                     experience_level=experience_level,
                     sort_by=sort_by,
                     easy_apply=easy_apply,
@@ -807,8 +822,9 @@ def search_jobs_thread(
                 jobs_state.update_progress(
                     progress, f"Coletando páginas: {page + 1}/{num_pages} ({len(job_ids)} IDs)"
                 )
-                if not new_ids:
+                if not new_ids or (limit_jobs > 0 and len(job_ids) >= limit_jobs):
                     break
+                start_offset += max(len(new_ids), PAGE_SIZE)
                 sleep(0.2)
 
             if not jobs_state.is_searching:
