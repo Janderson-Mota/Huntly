@@ -348,7 +348,7 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       'emptyTabRecommendedTitle', 'emptyTabRecommendedDesc',
       'labelLimitJobs', 'limit25', 'limit50', 'limit75', 'limitUnlimited',
       'translatedFromTo',
-      'ariaFooter', 'footerTagline', 'footerRights'
+      'ariaFooter', 'ariaFooterNav', 'footerTagline', 'footerBackToTop', 'footerRights'
     ];
     for (const l of langs) {
       if ('labelEasyApply' in i18n[l]) {
@@ -607,7 +607,9 @@ def test_home_renders_minimalist_footer(client):
     assert res.status_code == 200
     html = res.data.decode("utf-8")
     assert '<footer class="site-footer"' in html
+    assert 'class="footer-nav"' in html
     assert 'data-i18n="footerTagline"' in html
+    assert 'data-i18n="footerBackToTop"' in html
     assert 'data-i18n="footerRights"' in html
 
 
