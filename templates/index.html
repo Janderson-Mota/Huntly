@@ -23,9 +23,7 @@
       <nav class="navbar-links">
         <a href="#filtros" class="nav-link" data-i18n="navFilters">filtros</a>
         <a href="#resultados" class="nav-link" data-i18n="navResults">resultados</a>
-        <span class="results-pill" id="navbar-results-pill">
-          <span id="navbar-results-count">0 vagas</span>
-        </span>
+  
         <select id="lang-select" class="lang-select" aria-label="Idioma" data-i18n-aria-label="ariaLangSelect">
           <option value="pt">🇧🇷 Português</option>
           <option value="en">🇺🇸 English</option>
@@ -50,12 +48,12 @@
         <!-- Campos Principais -->
         <div class="primary-inputs-grid">
           <div class="form-group">
-            <label for="keywords" id="keywords-label" data-i18n="labelKeywords">Cargo ou Palavra-chave</label>
+            <label for="keywords" id="keywords-label" data-i18n="labelKeywords">Cargo ou Palavra-chave (opcional)</label>
             <div class="input-with-icon">
               <i class="bi bi-search"></i>
               <input type="text" class="form-control" id="keywords" name="keywords" list="it-role-suggestions"
                 data-i18n-placeholder="placeholderKeywords"
-                placeholder="Ex: Desenvolvedor Python, Engenheiro de Dados, DevOps..." required />
+                placeholder="Ex: Desenvolvedor Python, Engenheiro de Dados, DevOps..." />
               <datalist id="it-role-suggestions"></datalist>
             </div>
           </div>

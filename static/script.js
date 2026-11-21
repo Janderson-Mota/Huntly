@@ -685,7 +685,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isSearching) return;
 
     const searchData = getFormData();
-    if (!searchData.keywords) {
+    const hasSelectedFilter = Boolean(
+      searchData.location ||
+      searchData.max_date ||
+      (Array.isArray(searchData.experience_level) && searchData.experience_level.length > 0) ||
+      (Array.isArray(searchData.work_mode) && searchData.work_mode.length > 0)
+    );
+    if (!searchData.keywords && !hasSelectedFilter) {
       showFeedback(t("errNoKeyword"), "errNoKeyword");
       return;
     }

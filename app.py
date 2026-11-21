@@ -155,9 +155,6 @@ def start_search():
             return err
 
         keywords = _parse_str(params.get("keywords"), max_len=200)
-        if not keywords:
-            return jsonify({"error": "Informe uma palavra-chave para buscar.", "error_code": "errNoKeyword"}), 400
-
         location = _parse_str(params.get("location"), max_len=200)
         max_date = _parse_str(params.get("max_date"), max_len=30)
         distance = _parse_str(params.get("distance"), max_len=10)
@@ -169,6 +166,20 @@ def start_search():
         easy_apply = _parse_bool(params.get("easy_apply"), default=False)
         limit_jobs = _parse_limit(params.get("limit_jobs"), default=DEFAULT_LIMIT_JOBS)
         lang = _parse_str(params.get("lang"), max_len=10).lower() or "en"
+
+        has_filter_select = bool(
+            location
+            or max_date
+            or place
+            or experience_level
+            or job_type
+            or easy_apply
+        )
+        if not keywords and not has_filter_select:
+            return jsonify({
+                "error": "Informe um cargo/palavra-chave ou selecione ao menos um filtro (país, data, nível de experiência ou modalidade).",
+                "error_code": "errNoKeyword",
+            }), 400
 
         if not jobs_state.start():
             return jsonify({"error": "Uma busca de vagas já está em andamento.", "error_code": "errAlreadyRunning"}), 400

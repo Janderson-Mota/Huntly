@@ -562,3 +562,42 @@ def test_translate_deduplicates_identical_texts_and_skips_obvious_same_lang():
         assert out_bi == f"[PT] {bilingual_desc}"
 
 
+def test_search_allows_empty_keywords_when_filter_selected_and_rejects_empty_form(client):
+    # Completely empty filters (even with default sort_by/limit_jobs overridden) -> 400
+    empty_res = client.post(
+        "/search",
+        json={"type": "jobs", "keywords": "   ", "sort_by": "DD", "limit_jobs": 50},
+    )
+    assert empty_res.status_code == 400
+    assert empty_res.get_json()["error_code"] == "errNoKeyword"
+
+    valid_filter_payloads = [
+        {"type": "jobs", "keywords": "", "location": "Brazil"},
+        {"type": "jobs", "keywords": "", "max_date": "r24h"},
+        {"type": "jobs", "keywords": "", "experience_level": ["2"]},
+        {"type": "jobs", "keywords": "", "work_mode": ["2"]},
+    ]
+
+    with patch("app.threading.Thread") as mock_thread:
+        mock_thread.return_value.start.return_value = None
+        for payload in valid_filter_payloads:
+            jobs_state.stop()
+            res = client.post("/search", json=payload)
+            assert res.status_code == 200, f"Expected 200 for {payload}, got {res.status_code}: {res.get_json()}"
+
+    query = build_params(
+        "",
+        "Brazil",
+        "r24h",
+        "",
+        [],
+        ["2"],
+        experience_level=["1", "2"],
+    )
+    assert "keywords=" not in query
+    assert "geoId=106057199" in query
+    assert "f_TPR=r24h" in query
+    assert "f_WT=2" in query
+    assert "f_E=1%2C2" in query
+
+
