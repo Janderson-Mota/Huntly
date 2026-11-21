@@ -17,8 +17,10 @@ _debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
 app.config["TEMPLATES_AUTO_RELOAD"] = _debug_mode
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0 if _debug_mode else 3600
 
+MIN_LIMIT_JOBS = 25
 DEFAULT_LIMIT_JOBS = 25
-UNLIMITED_JOBS_CAP = 250
+MAX_LIMIT_JOBS = 50
+UNLIMITED_JOBS_CAP = MAX_LIMIT_JOBS
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 _EXPORT_PREFIXES = {
     "pt": "vagas_linkedin",
@@ -48,20 +50,25 @@ def add_security_headers(response):
     return response
 
 
-def _parse_limit(raw_value: Any, default: int = DEFAULT_LIMIT_JOBS, max_limit: int = UNLIMITED_JOBS_CAP) -> int:
+def _parse_limit(
+    raw_value: Any,
+    default: int = DEFAULT_LIMIT_JOBS,
+    min_limit: int = MIN_LIMIT_JOBS,
+    max_limit: int = MAX_LIMIT_JOBS,
+) -> int:
     if raw_value is None or raw_value == "":
         return default
     if isinstance(raw_value, bool):
         raise _ValidationError("Limite deve ser um número inteiro válido.", "errInvalidLimit")
     if isinstance(raw_value, str) and raw_value.strip().lower() in ("unlimited", "all", "sem_restricao"):
-        return UNLIMITED_JOBS_CAP
+        return max_limit
     try:
         value = int(raw_value)
     except (TypeError, ValueError) as exc:
         raise _ValidationError("Limite deve ser um número inteiro válido.", "errInvalidLimit") from exc
-    if value == 0:
-        return UNLIMITED_JOBS_CAP
-    return max(1, min(value, max_limit))
+    if value <= 0:
+        return default
+    return max(min_limit, min(value, max_limit))
 
 
 def _parse_str(raw_value: Any, max_len: int = 200) -> str:

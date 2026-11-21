@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app import DEFAULT_LIMIT_JOBS, UNLIMITED_JOBS_CAP, app
+from app import DEFAULT_LIMIT_JOBS, MAX_LIMIT_JOBS, MIN_LIMIT_JOBS, UNLIMITED_JOBS_CAP, app
 from scraper import (
     UNLIMITED_JOBS_CAP as SCRAPER_UNLIMITED_CAP,
     build_params,
@@ -84,13 +84,22 @@ def test_search_multiselect_accepts_lists_and_single_strings(client):
 
 
 def test_limit_jobs_parsing_and_unlimited_cap(client):
+    assert DEFAULT_LIMIT_JOBS == 25
+    assert MIN_LIMIT_JOBS == 25
+    assert MAX_LIMIT_JOBS == 50
+    assert UNLIMITED_JOBS_CAP == 50
+    assert SCRAPER_UNLIMITED_CAP == 50
+
     cases = [
-        (None, DEFAULT_LIMIT_JOBS),
+        (None, 25),
+        (0, 25),
+        (10, 25),
         (25, 25),
-        (75, 75),
-        ("unlimited", UNLIMITED_JOBS_CAP),
-        (0, UNLIMITED_JOBS_CAP),
-        (500, UNLIMITED_JOBS_CAP),
+        (40, 40),
+        (50, 50),
+        (75, 50),
+        ("unlimited", 50),
+        (500, 50),
     ]
     for raw_limit, expected in cases:
         jobs_state.stop()
@@ -104,8 +113,9 @@ def test_limit_jobs_parsing_and_unlimited_cap(client):
             args, _ = mock_thread.call_args
             assert args[6] == expected
 
-    assert get_job_count(None, "python", "", "", "", [], [], limit_jobs=0) == SCRAPER_UNLIMITED_CAP
-    assert get_job_count(None, "python", "", "", "", [], [], limit_jobs=999) == SCRAPER_UNLIMITED_CAP
+    assert get_job_count(None, "python", "", "", "", [], [], limit_jobs=0) == 25
+    assert get_job_count(None, "python", "", "", "", [], [], limit_jobs=10) == 25
+    assert get_job_count(None, "python", "", "", "", [], [], limit_jobs=999) == 50
 
 
 def test_build_params_encodes_multiselect_comma_separated_and_deduped():
@@ -330,6 +340,8 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
         html = fh.read()
     assert html.count('<input type="checkbox" name="experience_level"') == 7
     assert 'id="easy_apply"' not in html
+    assert '<option value="75"' not in html
+    assert '<option value="unlimited"' not in html
 
     js_check = r"""
     const fs = require('fs');
@@ -346,13 +358,13 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       'ariaResultsTabs', 'tabMatched', 'tabRecommended',
       'emptyTabMatchedTitle', 'emptyTabMatchedDesc',
       'emptyTabRecommendedTitle', 'emptyTabRecommendedDesc',
-      'labelLimitJobs', 'limit25', 'limit50', 'limit75', 'limitUnlimited',
+      'labelLimitJobs', 'limit25', 'limit50',
       'translatedFromTo',
       'ariaMainNav', 'ariaFooter', 'footerRights'
     ];
     for (const l of langs) {
-      if ('labelEasyApply' in i18n[l]) {
-        throw new Error('Obsolete labelEasyApply present in ' + l);
+      if ('labelEasyApply' in i18n[l] || 'limit75' in i18n[l] || 'limitUnlimited' in i18n[l]) {
+        throw new Error('Obsolete filter/limit key present in ' + l);
       }
       if (!i18n[l].langNames || typeof i18n[l].langNames !== 'object' || !i18n[l].langNames.en || !i18n[l].langNames.pt) {
         throw new Error('Missing langNames map in ' + l);

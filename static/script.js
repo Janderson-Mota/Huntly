@@ -662,7 +662,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const formData = new FormData(searchForm);
     const workModes = getMultiSelectValues(workModeMultiselect);
     const experienceLevels = getMultiSelectValues(experienceMultiselect);
-    const rawLimit = String(formData.get("limit_jobs") || "25");
+    const parsedLimit = Number(formData.get("limit_jobs"));
+    const clampedLimit = Number.isFinite(parsedLimit)
+      ? Math.min(50, Math.max(25, Math.trunc(parsedLimit)))
+      : 25;
     return {
       type: "jobs",
       lang: currentLang,
@@ -676,7 +679,7 @@ document.addEventListener("DOMContentLoaded", () => {
       place: workModes,
       experience_level: experienceLevels,
       easy_apply: false,
-      limit_jobs: rawLimit === "unlimited" ? "unlimited" : Number(rawLimit) || 25,
+      limit_jobs: clampedLimit,
     };
   }
 
