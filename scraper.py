@@ -18,13 +18,181 @@ PAGE_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/sear
 POST_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/"
 PUBLIC_JOB_URL = "https://www.linkedin.com/jobs/view/"
 
+ACCEPT_LANGUAGE_MAP: Dict[str, str] = {
+    "pt": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "en": "en-US,en;q=0.9",
+    "es": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+    "fr": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "it": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+    "de": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+    "ru": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "zh": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def build_headers(lang: str = "en") -> Dict[str, str]:
+    """Build LinkedIn request headers aligned to the selected UI language (fallback en-US)."""
+    lang_key = (lang or "en").strip().lower().split("-")[0]
+    accept_lang = ACCEPT_LANGUAGE_MAP.get(lang_key, "en-US,en;q=0.9")
+    return {
+        "User-Agent": DEFAULT_HEADERS["User-Agent"],
+        "Accept-Language": accept_lang,
+    }
+
+
+EMPLOYMENT_TYPE_HEADERS = {
+    "tipo de emprego",
+    "employment type",
+    "tipo de empleo",
+    "type d'emploi",
+    "tipo di impiego",
+    "beschaftigungsart",
+    "тип занятости",
+    "雇佣类型",
+}
+
+EXPERIENCE_LEVEL_HEADERS = {
+    "nivel de experiencia",
+    "seniority level",
+    "nivel de antiguedad",
+    "niveau hierarchique",
+    "livello di anzianita",
+    "karrierestufe",
+    "уровень",
+    "уровень опыта",
+    "职级",
+    "经验级别",
+}
+
+EMPLOYMENT_TYPE_VALUE_CODES: Dict[str, str] = {
+    "tempo integral": "full_time",
+    "full-time": "full_time",
+    "full time": "full_time",
+    "jornada completa": "full_time",
+    "tiempo completo": "full_time",
+    "temps plein": "full_time",
+    "tempo pieno": "full_time",
+    "vollzeit": "full_time",
+    "полная занятость": "full_time",
+    "全职": "full_time",
+    "meio periodo": "part_time",
+    "part-time": "part_time",
+    "part time": "part_time",
+    "media jornada": "part_time",
+    "tiempo parcial": "part_time",
+    "temps partiel": "part_time",
+    "teilzeit": "part_time",
+    "частичная занятость": "part_time",
+    "兼职": "part_time",
+    "contrato": "contract",
+    "contract": "contract",
+    "contrat": "contract",
+    "contratto": "contract",
+    "vertrag": "contract",
+    "befristet": "contract",
+    "контракт": "contract",
+    "合同工": "contract",
+    "temporario": "temporary",
+    "temporary": "temporary",
+    "temporal": "temporary",
+    "temporaire": "temporary",
+    "temporaneo": "temporary",
+    "zeitarbeit": "temporary",
+    "временная": "temporary",
+    "临时工": "temporary",
+    "estagio": "internship",
+    "internship": "internship",
+    "practicas": "internship",
+    "stage": "internship",
+    "tirocinio": "internship",
+    "praktikum": "internship",
+    "стажировка": "internship",
+    "实习": "internship",
+    "voluntario": "volunteer",
+    "volunteer": "volunteer",
+    "voluntariado": "volunteer",
+    "benevolat": "volunteer",
+    "volontariato": "volunteer",
+    "ehrenamt": "volunteer",
+    "волонтерство": "volunteer",
+    "志愿者": "volunteer",
+    "outro": "other",
+    "other": "other",
+    "otro": "other",
+    "autre": "other",
+    "altro": "other",
+    "sonstiges": "other",
+    "другое": "other",
+    "其他": "other",
+}
+
+EXPERIENCE_LEVEL_VALUE_CODES: Dict[str, str] = {
+    "estagio": "internship",
+    "internship": "internship",
+    "practicas": "internship",
+    "stage": "internship",
+    "tirocinio": "internship",
+    "praktikum": "internship",
+    "стажировка": "internship",
+    "实习": "internship",
+    "junior": "entry_level",
+    "entry level": "entry_level",
+    "sin experiencia": "entry_level",
+    "sin experiencia previa": "entry_level",
+    "debutant": "entry_level",
+    "livello base": "entry_level",
+    "einstiegsposition": "entry_level",
+    "начальный уровень": "entry_level",
+    "初级": "entry_level",
+    "assistente": "associate",
+    "associate": "associate",
+    "algo de responsabilidad": "associate",
+    "premier emploi": "associate",
+    "livello intermedio": "associate",
+    "mitarbeiter": "associate",
+    "специалист": "associate",
+    "助理": "associate",
+    "pleno-senior": "mid_senior",
+    "mid-senior level": "mid_senior",
+    "mid senior level": "mid_senior",
+    "intermedio": "mid_senior",
+    "confirme": "mid_senior",
+    "medio-alto": "mid_senior",
+    "mittleres management": "mid_senior",
+    "berufserfahren": "mid_senior",
+    "руководитель среднего звена": "mid_senior",
+    "中高级": "mid_senior",
+    "diretor": "director",
+    "director": "director",
+    "direttore": "director",
+    "direktor": "director",
+    "директор": "director",
+    "总监": "director",
+    "executivo": "executive",
+    "executive": "executive",
+    "ejecutivo": "executive",
+    "cadre dirigeant": "executive",
+    "dirigente": "executive",
+    "geschaftsfuhrung": "executive",
+    "руководитель": "executive",
+    "高管": "executive",
+    "nao aplicavel": "not_applicable",
+    "not applicable": "not_applicable",
+    "no aplicable": "not_applicable",
+    "non applicable": "not_applicable",
+    "non applicabile": "not_applicable",
+    "nicht zutreffend": "not_applicable",
+    "не применимо": "not_applicable",
+    "不适用": "not_applicable",
 }
 
 MAX_RETRIES = 3
@@ -539,6 +707,7 @@ def get_job_count(
     experience_level: Optional[List[str]] = None,
     sort_by: str = "DD",
     easy_apply: bool = False,
+    lang: str = "en",
 ) -> int:
     if limit_jobs > 0:
         return limit_jobs
@@ -556,7 +725,7 @@ def get_job_count(
             easy_apply=easy_apply,
         )
         jobs_state.log(f"Consultando: {uri}")
-        res = session.get(uri, headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT)
+        res = session.get(uri, headers=build_headers(lang), timeout=REQUEST_TIMEOUT)
         soup = BeautifulSoup(res.text, "html.parser")
 
         job_count_element = (
@@ -587,6 +756,7 @@ def get_job_ids_per_page(
     easy_apply: bool = False,
     summaries_out: Optional[Dict[str, Dict[str, Any]]] = None,
     run_id: Optional[int] = None,
+    lang: str = "en",
 ) -> List[str]:
     uri = PAGE_URL + build_params(
         keywords,
@@ -600,13 +770,14 @@ def get_job_ids_per_page(
         sort_by=sort_by,
         easy_apply=easy_apply,
     )
+    headers = build_headers(lang)
 
     for attempt in range(MAX_RETRIES):
         if not jobs_state.is_run_active(run_id):
             return []
 
         try:
-            res = session.get(uri, headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT)
+            res = session.get(uri, headers=headers, timeout=REQUEST_TIMEOUT)
 
             if res.status_code == 404:
                 return []
@@ -707,15 +878,17 @@ def get_job_detail(
     job_id: str,
     fallback: Optional[Dict[str, Any]] = None,
     run_id: Optional[int] = None,
+    lang: str = "en",
 ) -> Dict[str, Any]:
     if not jobs_state.is_run_active(run_id):
         return {}
 
     uri = POST_URL + job_id
+    headers = build_headers(lang)
     for attempt in range(2):
         try:
             sleep(0.35)
-            res = session.get(uri, headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT)
+            res = session.get(uri, headers=headers, timeout=REQUEST_TIMEOUT)
             if res.status_code == 429 and attempt == 0:
                 sleep(2.0)
                 continue
@@ -742,7 +915,20 @@ def get_job_detail(
                 h3 = crit.find("h3")
                 span = crit.find("span")
                 if h3 and span:
-                    detail[h3.get_text(strip=True)] = span.get_text(strip=True)
+                    h3_text = h3.get_text(strip=True)
+                    span_text = span.get_text(strip=True)
+                    detail[h3_text] = span_text
+
+                    norm_h3 = _normalize_text(h3_text)
+                    norm_val = _normalize_text(span_text)
+                    if norm_h3 in EMPLOYMENT_TYPE_HEADERS:
+                        emp_code = EMPLOYMENT_TYPE_VALUE_CODES.get(norm_val)
+                        if emp_code:
+                            detail["employment_type_code"] = emp_code
+                    elif norm_h3 in EXPERIENCE_LEVEL_HEADERS:
+                        lvl_code = EXPERIENCE_LEVEL_VALUE_CODES.get(norm_val)
+                        if lvl_code:
+                            detail["experience_level_code"] = lvl_code
 
             return detail
         except Exception as exc:
@@ -769,6 +955,7 @@ def search_jobs_thread(
     easy_apply: bool = False,
     already_started: bool = False,
     run_id: Optional[int] = None,
+    lang: str = "en",
 ) -> None:
     if not already_started:
         if not jobs_state.start():
@@ -782,7 +969,13 @@ def search_jobs_thread(
             time_range = calculate_time_range(max_date)
             _, canonical_country, _ = normalize_location_for_linkedin(location)
 
-            jobs_state.log("Obtendo número total de vagas...", run_id=run_id)
+            jobs_state.update_progress(
+                0,
+                "Obtendo número total de vagas...",
+                run_id=run_id,
+                status_code="statusCounting",
+                status_params={},
+            )
             total_jobs = get_job_count(
                 session,
                 keywords,
@@ -795,6 +988,7 @@ def search_jobs_thread(
                 experience_level=experience_level,
                 sort_by=sort_by,
                 easy_apply=easy_apply,
+                lang=lang,
             )
             num_pages = max(1, math.ceil(total_jobs / PAGE_SIZE)) + (3 if canonical_country else 0)
             jobs_state.set_total(total_jobs, run_id=run_id)
@@ -823,6 +1017,7 @@ def search_jobs_thread(
                     easy_apply=easy_apply,
                     summaries_out=summaries,
                     run_id=run_id,
+                    lang=lang,
                 )
                 for jid in new_ids:
                     if jid in seen_ids:
@@ -835,7 +1030,11 @@ def search_jobs_thread(
 
                 progress = (page + 1) / num_pages * 50
                 jobs_state.update_progress(
-                    progress, f"Coletando páginas: {page + 1}/{num_pages} ({len(job_ids)} IDs)", run_id=run_id
+                    progress,
+                    f"Coletando páginas: {page + 1}/{num_pages} ({len(job_ids)} IDs)",
+                    run_id=run_id,
+                    status_code="statusCollectingPages",
+                    status_params={"page": page + 1, "pages": num_pages, "count": len(job_ids)},
                 )
                 if not new_ids or (limit_jobs > 0 and len(job_ids) >= limit_jobs):
                     break
@@ -850,7 +1049,12 @@ def search_jobs_thread(
                 job_ids = job_ids[:limit_jobs]
 
             if not job_ids:
-                jobs_state.finish("Nenhuma vaga encontrada para os filtros informados.", run_id=run_id)
+                jobs_state.finish(
+                    "Nenhuma vaga encontrada para os filtros informados.",
+                    run_id=run_id,
+                    status_code="statusNoResults",
+                    status_params={},
+                )
                 return
 
             jobs: List[Dict[str, Any]] = []
@@ -866,7 +1070,13 @@ def search_jobs_thread(
                     thread_local.session = s
                     with sessions_lock:
                         worker_sessions.append(s)
-                return get_job_detail(thread_local.session, jid, summaries.get(jid), run_id=run_id)
+                return get_job_detail(
+                    thread_local.session,
+                    jid,
+                    summaries.get(jid),
+                    run_id=run_id,
+                    lang=lang,
+                )
 
             try:
                 with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as executor:
@@ -891,13 +1101,27 @@ def search_jobs_thread(
 
                         progress = 50 + (completed / total_to_fetch) * 50
                         jobs_state.update_progress(
-                            progress, f"Obtendo detalhes: {completed}/{total_to_fetch} ({len(jobs)} vagas)", run_id=run_id
+                            progress,
+                            f"Obtendo detalhes: {completed}/{total_to_fetch} ({len(jobs)} vagas)",
+                            run_id=run_id,
+                            status_code="statusFetchingDetails",
+                            status_params={"completed": completed, "total": total_to_fetch, "found": len(jobs)},
                         )
             finally:
                 for ws in worker_sessions:
                     ws.close()
 
-            jobs_state.finish(f"Concluído: {len(jobs)} vagas encontradas", run_id=run_id)
+            jobs_state.finish(
+                f"Concluído: {len(jobs)} vagas encontradas",
+                run_id=run_id,
+                status_code="statusComplete",
+                status_params={"found": len(jobs)},
+            )
 
     except Exception as exc:
-        jobs_state.fail(f"Erro na busca de vagas: {exc}", run_id=run_id)
+        jobs_state.fail(
+            f"Erro na busca de vagas: {exc}",
+            run_id=run_id,
+            status_code="statusError",
+            status_params={"detail": str(exc)},
+        )

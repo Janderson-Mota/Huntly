@@ -24,7 +24,7 @@
         <span class="results-pill" id="navbar-results-pill">
           <span id="navbar-results-count">0 vagas</span>
         </span>
-        <select id="lang-select" class="lang-select" aria-label="Language">
+        <select id="lang-select" class="lang-select" aria-label="Idioma" data-i18n-aria-label="ariaLangSelect">
           <option value="pt">🇧🇷 Português</option>
           <option value="en">🇺🇸 English</option>
           <option value="es">🇪🇸 Español</option>
@@ -34,7 +34,7 @@
           <option value="ru">🇷🇺 Русский</option>
           <option value="zh">🇨🇳 中文</option>
         </select>
-        <button type="button" id="theme-toggle-btn" class="theme-toggle-btn" aria-label="Alternar tema">
+        <button type="button" id="theme-toggle-btn" class="theme-toggle-btn" aria-label="Alternar tema" data-i18n-aria-label="ariaThemeToggle">
           <i class="bi bi-moon" id="theme-icon"></i>
         </button>
       </nav>
@@ -43,7 +43,7 @@
 
   <main class="main-container">
     <!-- Painel de Filtros -->
-    <section id="filtros" class="filters-panel" aria-label="Filtros de Busca">
+    <section id="filtros" class="filters-panel" aria-label="Filtros de Busca" data-i18n-aria-label="ariaFiltersSection">
       <form id="search-form">
         <!-- Campos Principais -->
         <div class="primary-inputs-grid">
@@ -54,37 +54,7 @@
               <input type="text" class="form-control" id="keywords" name="keywords" list="it-role-suggestions"
                 data-i18n-placeholder="placeholderKeywords"
                 placeholder="Ex: Desenvolvedor Python, Engenheiro de Dados, DevOps..." required />
-              <datalist id="it-role-suggestions">
-                <option value="Desenvolvedor Full Stack"></option>
-                <option value="Desenvolvedor Back-end"></option>
-                <option value="Desenvolvedor Front-end"></option>
-                <option value="Desenvolvedor Mobile"></option>
-                <option value="Desenvolvedor Python"></option>
-                <option value="Desenvolvedor Java"></option>
-                <option value="Desenvolvedor Node.js"></option>
-                <option value="Desenvolvedor React"></option>
-                <option value="Desenvolvedor .NET"></option>
-                <option value="Engenheiro de Software"></option>
-                <option value="Engenheiro de Dados"></option>
-                <option value="Analista de Dados"></option>
-                <option value="Cientista de Dados"></option>
-                <option value="Engenheiro de Machine Learning"></option>
-                <option value="Engenheiro DevOps"></option>
-                <option value="Site Reliability Engineer (SRE)"></option>
-                <option value="Arquiteto de Software"></option>
-                <option value="Tech Lead"></option>
-                <option value="QA / Analista de Testes"></option>
-                <option value="Analista de Segurança da Informação"></option>
-                <option value="Cibersegurança"></option>
-                <option value="Administrador de Redes"></option>
-                <option value="Analista de Infraestrutura / Cloud"></option>
-                <option value="Suporte Técnico / Help Desk"></option>
-                <option value="Analista de Sistemas"></option>
-                <option value="UX/UI Designer"></option>
-                <option value="Product Manager"></option>
-                <option value="Scrum Master"></option>
-                <option value="Estágio em TI"></option>
-              </datalist>
+              <datalist id="it-role-suggestions"></datalist>
             </div>
           </div>
 
@@ -196,7 +166,7 @@
     </section>
 
     <!-- Seção de Resultados em Cards abaixo dos filtros -->
-    <section id="resultados" class="results-section" aria-label="Resultados da Busca">
+    <section id="resultados" class="results-section" aria-label="Resultados da Busca" data-i18n-aria-label="ariaResultsSection">
       <div id="results-toolbar" class="results-toolbar" style="display: none">
         <div class="quick-filter-box">
           <i class="bi bi-funnel"></i>
@@ -222,7 +192,7 @@
       </div>
 
       <div id="results-grid" class="results-grid"></div>
-      <nav id="pagination-bar" class="pagination-bar" style="display: none" aria-label="Paginação de resultados"></nav>
+      <nav id="pagination-bar" class="pagination-bar" style="display: none" aria-label="Paginação de resultados" data-i18n-aria-label="ariaPagination"></nav>
     </section>
   </main>
 
@@ -231,10 +201,10 @@
     <div class="modal-card">
       <div class="modal-header">
         <div>
-          <h3 id="modal-title">Título da Vaga</h3>
+          <h3 id="modal-title" data-i18n="modalTitleFallback">Título da Vaga</h3>
           <p id="modal-company" class="modal-subtitle"></p>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" id="close-modal-btn" aria-label="Fechar">
+        <button type="button" class="btn btn-ghost btn-sm" id="close-modal-btn" aria-label="Fechar" data-i18n-aria-label="ariaCloseModal">
           <i class="bi bi-x-lg"></i>
         </button>
       </div>

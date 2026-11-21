@@ -19,6 +19,8 @@ class SearchState:
         self._status = "idle"
         self._progress: float = 0
         self._status_message = "Pronto para iniciar"
+        self._status_code = "statusReady"
+        self._status_params: Dict[str, Any] = {}
         self._log_messages: deque[str] = deque(maxlen=MAX_LOG_ENTRIES)
         self._results: List[Dict[str, Any]] = []
         self._total = 0
@@ -48,6 +50,8 @@ class SearchState:
             self._status = "running"
             self._progress = 0
             self._status_message = "Iniciando busca..."
+            self._status_code = "statusStarting"
+            self._status_params = {}
             self._log_messages.clear()
             self._results = []
             self._total = 0
@@ -62,8 +66,16 @@ class SearchState:
             if self._status == "running":
                 self._status = "stopped"
                 self._status_message = "Busca interrompida"
+                self._status_code = "statusStopped"
+                self._status_params = {}
 
-    def finish(self, message: str, run_id: Optional[int] = None) -> None:
+    def finish(
+        self,
+        message: str,
+        run_id: Optional[int] = None,
+        status_code: Optional[str] = None,
+        status_params: Optional[Dict[str, Any]] = None,
+    ) -> None:
         with self._lock:
             if run_id is not None and (run_id != self._run_id or not self._is_searching):
                 return
@@ -71,15 +83,25 @@ class SearchState:
             self._status = "complete"
             self._progress = 100
             self._status_message = message
+            self._status_code = status_code or "statusComplete"
+            self._status_params = dict(status_params or {})
             self._append_log_locked(message)
 
-    def fail(self, message: str, run_id: Optional[int] = None) -> None:
+    def fail(
+        self,
+        message: str,
+        run_id: Optional[int] = None,
+        status_code: Optional[str] = None,
+        status_params: Optional[Dict[str, Any]] = None,
+    ) -> None:
         with self._lock:
             if run_id is not None and run_id != self._run_id:
                 return
             self._is_searching = False
             self._status = "error"
             self._status_message = message
+            self._status_code = status_code or "statusError"
+            self._status_params = dict(status_params or {})
             self._append_log_locked(message)
 
     def log(self, message: str, run_id: Optional[int] = None) -> None:
@@ -94,12 +116,22 @@ class SearchState:
         self._log_messages.append(entry)
         print(entry)
 
-    def update_progress(self, progress: float, message: str, run_id: Optional[int] = None) -> None:
+    def update_progress(
+        self,
+        progress: float,
+        message: str,
+        run_id: Optional[int] = None,
+        status_code: Optional[str] = None,
+        status_params: Optional[Dict[str, Any]] = None,
+    ) -> None:
         with self._lock:
             if run_id is not None and run_id != self._run_id:
                 return
             self._progress = max(0, min(100, round(progress, 1)))
             self._status_message = message
+            if status_code is not None:
+                self._status_code = status_code
+                self._status_params = dict(status_params or {})
             self._append_log_locked(message)
 
     def set_total(self, total: int, run_id: Optional[int] = None) -> None:
@@ -126,6 +158,8 @@ class SearchState:
                 "status": self._status,
                 "progress": self._progress,
                 "status_message": self._status_message,
+                "status_code": self._status_code,
+                "status_params": dict(self._status_params),
                 "log_messages": list(self._log_messages),
                 self._total_key: self._total,
                 self._collected_key: self._collected,

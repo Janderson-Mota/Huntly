@@ -16,6 +16,24 @@ app.config["TEMPLATES_AUTO_RELOAD"] = _debug_mode
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0 if _debug_mode else 3600
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+_EXPORT_PREFIXES = {
+    "pt": "vagas_linkedin",
+    "en": "linkedin_jobs",
+    "es": "empleos_linkedin",
+    "fr": "offres_linkedin",
+    "it": "offerte_linkedin",
+    "de": "linkedin_jobs",
+    "ru": "linkedin_jobs",
+    "zh": "linkedin_jobs",
+}
+
+
+class _ValidationError(ValueError):
+    """Validation error carrying a stable i18n error code."""
+
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @app.after_request
@@ -30,11 +48,11 @@ def _parse_limit(raw_value: Any, default: int = 100, max_limit: int = 500) -> in
     if raw_value is None or raw_value == "":
         return default
     if isinstance(raw_value, bool):
-        raise ValueError("Limite deve ser um número inteiro válido.")
+        raise _ValidationError("Limite deve ser um número inteiro válido.", "errInvalidLimit")
     try:
         value = int(raw_value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("Limite deve ser um número inteiro válido.") from exc
+        raise _ValidationError("Limite deve ser um número inteiro válido.", "errInvalidLimit") from exc
     return max(1, min(value, max_limit))
 
 
@@ -42,7 +60,7 @@ def _parse_str(raw_value: Any, max_len: int = 200) -> str:
     if raw_value is None:
         return ""
     if not isinstance(raw_value, str):
-        raise ValueError("Parâmetro textual inválido.")
+        raise _ValidationError("Parâmetro textual inválido.", "errInvalidTextParam")
     return raw_value.strip()[:max_len]
 
 
@@ -50,13 +68,13 @@ def _parse_str_list(raw_value: Any) -> List[str]:
     if raw_value is None or raw_value == "":
         return []
     if not isinstance(raw_value, list):
-        raise ValueError("Filtro deve ser uma lista.")
+        raise _ValidationError("Filtro deve ser uma lista.", "errInvalidFilterList")
     return [str(item).strip() for item in raw_value if item is not None and str(item).strip()]
 
 
 def _validate_search_type(search_type: Any):
     if search_type != "jobs":
-        return jsonify({"error": "Tipo de busca inválido."}), 400
+        return jsonify({"error": "Tipo de busca inválido.", "error_code": "errInvalidSearchType"}), 400
     return None
 
 
@@ -72,7 +90,7 @@ def start_search():
         if params is None:
             params = {}
         if not isinstance(params, dict):
-            return jsonify({"error": "Payload JSON deve ser um objeto."}), 400
+            return jsonify({"error": "Payload JSON deve ser um objeto.", "error_code": "errInvalidPayload"}), 400
 
         err = _validate_search_type(params.get("type", "jobs"))
         if err:
@@ -80,7 +98,7 @@ def start_search():
 
         keywords = _parse_str(params.get("keywords"), max_len=200)
         if not keywords:
-            return jsonify({"error": "Informe uma palavra-chave para buscar."}), 400
+            return jsonify({"error": "Informe uma palavra-chave para buscar.", "error_code": "errNoKeyword"}), 400
 
         location = _parse_str(params.get("location"), max_len=200)
         max_date = _parse_str(params.get("max_date"), max_len=30)
@@ -91,9 +109,10 @@ def start_search():
         experience_level = _parse_str_list(params.get("experience_level"))
         easy_apply = bool(params.get("easy_apply", False))
         limit_jobs = _parse_limit(params.get("limit_jobs"), default=100)
+        lang = _parse_str(params.get("lang"), max_len=10).lower() or "en"
 
         if not jobs_state.start():
-            return jsonify({"error": "Uma busca de vagas já está em andamento."}), 400
+            return jsonify({"error": "Uma busca de vagas já está em andamento.", "error_code": "errAlreadyRunning"}), 400
 
         run_id = jobs_state.run_id
         args = (
@@ -114,7 +133,7 @@ def start_search():
             search_thread = threading.Thread(
                 target=search_jobs_thread,
                 args=args,
-                kwargs={"run_id": run_id},
+                kwargs={"run_id": run_id, "lang": lang},
                 daemon=True,
             )
             search_thread.start()
@@ -122,12 +141,14 @@ def start_search():
             jobs_state.stop(run_id=run_id)
             raise
 
-        return jsonify({"message": "Busca de vagas iniciada."}), 200
+        return jsonify({"message": "Busca de vagas iniciada.", "message_code": "msgSearchStarted"}), 200
 
+    except _ValidationError as exc:
+        return jsonify({"error": str(exc), "error_code": exc.code}), 400
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": str(exc), "error_code": "errInvalidPayload"}), 400
     except Exception:
-        return jsonify({"error": "Erro interno ao iniciar a busca."}), 500
+        return jsonify({"error": "Erro interno ao iniciar a busca.", "error_code": "errInternalStart"}), 500
 
 
 @app.route("/stop", methods=["POST"])
@@ -136,14 +157,14 @@ def stop_search():
     if params is None:
         params = {}
     if not isinstance(params, dict):
-        return jsonify({"error": "Payload JSON deve ser um objeto."}), 400
+        return jsonify({"error": "Payload JSON deve ser um objeto.", "error_code": "errInvalidPayload"}), 400
 
     search_type = params.get("type", "jobs")
     err = _validate_search_type(search_type)
     if err:
         return err
     jobs_state.stop()
-    return jsonify({"message": "Busca de vagas interrompida."}), 200
+    return jsonify({"message": "Busca de vagas interrompida.", "message_code": "msgSearchStopped"}), 200
 
 
 @app.route("/status")
@@ -168,7 +189,7 @@ def get_job_details(job_id: str):
     job = next((item for item in jobs_state.get_results() if item.get("id") == job_id), None)
     if job:
         return jsonify(job)
-    return jsonify({"error": "Vaga não encontrada."}), 404
+    return jsonify({"error": "Vaga não encontrada.", "error_code": "errJobNotFound"}), 404
 
 
 def _sanitize_csv_cell(value: Any) -> Any:
@@ -201,22 +222,29 @@ def generate_csv(items: List[Dict[str, Any]]) -> str:
     return output.getvalue()
 
 
-def _get_export_results(search_type: str):
+def _get_export_results(search_type: str, lang: str = ""):
     err = _validate_search_type(search_type)
     if err:
         return None, None, err
 
     results = [item for item in jobs_state.get_results() if not item.get("error")]
     if not results:
-        return None, None, (jsonify({"error": "Nenhum resultado disponível para exportação."}), 400)
+        return None, None, (
+            jsonify({"error": "Nenhum resultado disponível para exportação.", "error_code": "errNoExportResults"}),
+            400,
+        )
 
+    prefix = _EXPORT_PREFIXES.get(lang.strip().lower(), "vagas_linkedin")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return results, f"vagas_linkedin_{timestamp}", None
+    return results, f"{prefix}_{timestamp}", None
 
 
 @app.route("/export/csv")
 def export_to_csv():
-    results, base_filename, err_response = _get_export_results(request.args.get("type", "jobs"))
+    results, base_filename, err_response = _get_export_results(
+        request.args.get("type", "jobs"),
+        lang=request.args.get("lang", ""),
+    )
     if err_response:
         return err_response
 
@@ -230,7 +258,10 @@ def export_to_csv():
 
 @app.route("/export/json")
 def export_to_json():
-    results, base_filename, err_response = _get_export_results(request.args.get("type", "jobs"))
+    results, base_filename, err_response = _get_export_results(
+        request.args.get("type", "jobs"),
+        lang=request.args.get("lang", ""),
+    )
     if err_response:
         return err_response
 

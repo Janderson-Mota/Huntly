@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const resetFiltersBtn = document.getElementById("reset-filters-btn");
 
   const keywordsInput = document.getElementById("keywords");
+  const roleSuggestionsDatalist = document.getElementById("it-role-suggestions");
   const countrySelect = document.getElementById("country");
   const stateSelect = document.getElementById("state");
   const cityInput = document.getElementById("city");
@@ -34,7 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const modalLink = document.getElementById("modal-link");
 
   const LOCATION_DATA = {
-    Brasil: {
+    Brazil: {
       "Acre": ["Rio Branco"],
       "Alagoas": ["Maceió"],
       "Amapá": ["Macapá"],
@@ -142,6 +143,23 @@ document.addEventListener("DOMContentLoaded", () => {
     return str;
   }
 
+  function tCountry(countryKey) {
+    const dictCountries = I18N[currentLang]?.countries || {};
+    const ptCountries = I18N.pt?.countries || {};
+    return dictCountries[countryKey] || ptCountries[countryKey] || countryKey;
+  }
+
+  function populateRoleSuggestions() {
+    if (!roleSuggestionsDatalist) return;
+    const suggestions = I18N[currentLang]?.roleSuggestions || I18N.pt?.roleSuggestions || [];
+    roleSuggestionsDatalist.innerHTML = "";
+    suggestions.forEach((role) => {
+      const opt = document.createElement("option");
+      opt.value = role;
+      roleSuggestionsDatalist.appendChild(opt);
+    });
+  }
+
   function applyLanguage(lang) {
     if (!I18N[lang]) return;
     currentLang = lang;
@@ -157,15 +175,32 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
+    document.querySelectorAll("[data-i18n-aria-label]").forEach((el) => {
+      el.setAttribute("aria-label", t(el.dataset.i18nAriaLabel));
+    });
+
+    populateRoleSuggestions();
 
     if (countrySelect && countrySelect.options.length > 0) {
-      countrySelect.options[0].textContent = t("allCountries");
+      Array.from(countrySelect.options).forEach((opt, idx) => {
+        opt.textContent = idx === 0 ? t("allCountries") : tCountry(opt.value);
+      });
     }
     if (stateSelect && stateSelect.options.length > 0) {
       stateSelect.options[0].textContent = countrySelect.value ? t("allStates") : t("selectCountryFirst");
     }
 
     renderFilteredResults();
+
+    if (jobModal.style.display !== "none" && activeModalJob) {
+      openJobModal(activeModalJob);
+    }
+    if (lastStatusPayload && statusSection.style.display !== "none") {
+      updateStatusBar(lastStatusPayload);
+    }
+    if (lastFeedback && feedbackBanner.style.display !== "none") {
+      renderFeedback();
+    }
   }
 
   const ITEMS_PER_PAGE = 9;
@@ -174,6 +209,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentPage = 1;
   let pollTimeout = null;
   let lastCollectedCount = -1;
+  let activeModalJob = null;
+  let lastStatusPayload = null;
+  let lastFeedback = null;
 
   function readStorage(key, fallback) {
     try {
@@ -239,7 +277,7 @@ document.addEventListener("DOMContentLoaded", () => {
     Object.keys(LOCATION_DATA).forEach((country) => {
       const opt = document.createElement("option");
       opt.value = country;
-      opt.textContent = country;
+      opt.textContent = tCountry(country);
       countrySelect.appendChild(opt);
     });
 
@@ -305,7 +343,7 @@ document.addEventListener("DOMContentLoaded", () => {
   exportButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
       if (!searchResults.length) return;
-      window.location.href = `/export/${btn.dataset.format}?type=jobs`;
+      window.location.href = `/export/${btn.dataset.format}?type=jobs&lang=${encodeURIComponent(currentLang)}`;
     });
   });
 
@@ -331,14 +369,32 @@ document.addEventListener("DOMContentLoaded", () => {
   initLocationCascade();
   applyLanguage(currentLang);
 
-  function showFeedback(message) {
-    if (!message) {
+  function renderFeedback() {
+    if (!lastFeedback) {
       feedbackBanner.style.display = "none";
       feedbackBanner.textContent = "";
       return;
     }
-    feedbackBanner.textContent = message;
+    const prefix = lastFeedback.prefixKey ? t(lastFeedback.prefixKey) : "";
+    const body = lastFeedback.key ? t(lastFeedback.key, lastFeedback.vars || {}) : lastFeedback.text || "";
+    const msg = `${prefix}${body}`.trim();
+    if (!msg) {
+      feedbackBanner.style.display = "none";
+      feedbackBanner.textContent = "";
+      return;
+    }
+    feedbackBanner.textContent = msg;
     feedbackBanner.style.display = "block";
+  }
+
+  function showFeedback(message, key = null, vars = {}, prefixKey = null) {
+    if (!message && !key) {
+      lastFeedback = null;
+      renderFeedback();
+      return;
+    }
+    lastFeedback = { text: message || "", key, vars, prefixKey };
+    renderFeedback();
   }
 
   function resetFilters() {
@@ -356,6 +412,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const expLevel = formData.get("experience_level");
     return {
       type: "jobs",
+      lang: currentLang,
       keywords: (formData.get("keywords") || "").trim(),
       location: buildLocationString(),
       max_date: formData.get("job_max_date") || "",
@@ -375,7 +432,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const searchData = getFormData();
     if (!searchData.keywords) {
-      showFeedback(t("errNoKeyword"));
+      showFeedback(t("errNoKeyword"), "errNoKeyword");
       return;
     }
 
@@ -392,12 +449,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.error || t("errGeneric"));
+        const err = new Error(payload.error || t("errGeneric"));
+        err.code = payload.error_code || null;
+        throw err;
       }
 
       pollResults();
     } catch (error) {
-      showFeedback(`${t("errPrefix")}${error.message}`);
+      if (error.code && I18N[currentLang]?.[error.code]) {
+        showFeedback("", error.code, {}, "errPrefix");
+      } else {
+        showFeedback(`${t("errPrefix")}${error.message}`);
+      }
       setIdleState();
     }
   }
@@ -406,7 +469,11 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await fetch("/status?type=jobs&include_results=0");
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || t("errGeneric"));
+      if (!response.ok) {
+        const err = new Error(data.error || t("errGeneric"));
+        err.code = data.error_code || null;
+        throw err;
+      }
 
       updateStatusBar(data);
       const collectedCount = data.collected_jobs || 0;
@@ -424,7 +491,11 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.status === "complete" || data.progress === 100) {
         setIdleState();
       } else if (data.status === "error") {
-        showFeedback(data.status_message || t("errGeneric"));
+        if (data.status_code && I18N[currentLang]?.[data.status_code]) {
+          showFeedback("", data.status_code, data.status_params || {});
+        } else {
+          showFeedback(data.status_message || t("errGeneric"), "errGeneric");
+        }
         setIdleState();
       } else if (data.status === "stopped" || !data.is_searching) {
         setIdleState();
@@ -432,7 +503,11 @@ document.addEventListener("DOMContentLoaded", () => {
         pollTimeout = setTimeout(pollResults, 900);
       }
     } catch (error) {
-      showFeedback(`${t("errComm")}${error.message}`);
+      if (error.code && I18N[currentLang]?.[error.code]) {
+        showFeedback("", error.code, {}, "errPrefix");
+      } else {
+        showFeedback(error.message, null, {}, "errComm");
+      }
       setIdleState();
     }
   }
@@ -589,6 +664,228 @@ document.addEventListener("DOMContentLoaded", () => {
     return trimmed.startsWith("https://") ? trimmed : "#";
   }
 
+  const EMPLOYMENT_CODE_KEYS = {
+    full_time: "empFullTime",
+    part_time: "empPartTime",
+    contract: "empContract",
+    temporary: "empTemporary",
+    internship: "empInternship",
+    volunteer: "empVolunteer",
+    other: "empOther",
+  };
+
+  const EMPLOYMENT_TEXT_MAP = {
+    "tempo integral": "empFullTime",
+    "full-time": "empFullTime",
+    "full time": "empFullTime",
+    "jornada completa": "empFullTime",
+    "tiempo completo": "empFullTime",
+    "temps plein": "empFullTime",
+    "tempo pieno": "empFullTime",
+    "vollzeit": "empFullTime",
+    "полная занятость": "empFullTime",
+    "全职": "empFullTime",
+    "meio periodo": "empPartTime",
+    "part-time": "empPartTime",
+    "part time": "empPartTime",
+    "media jornada": "empPartTime",
+    "tiempo parcial": "empPartTime",
+    "temps partiel": "empPartTime",
+    "teilzeit": "empPartTime",
+    "частичная занятость": "empPartTime",
+    "兼职": "empPartTime",
+    "contrato": "empContract",
+    "contract": "empContract",
+    "contrat": "empContract",
+    "contratto": "empContract",
+    "vertrag": "empContract",
+    "befristet": "empContract",
+    "контракт": "empContract",
+    "合同工": "empContract",
+    "temporario": "empTemporary",
+    "temporary": "empTemporary",
+    "temporal": "empTemporary",
+    "temporaire": "empTemporary",
+    "temporaneo": "empTemporary",
+    "zeitarbeit": "empTemporary",
+    "временная": "empTemporary",
+    "临时工": "empTemporary",
+    "estagio": "empInternship",
+    "internship": "empInternship",
+    "practicas": "empInternship",
+    "stage": "empInternship",
+    "tirocinio": "empInternship",
+    "praktikum": "empInternship",
+    "стажировка": "empInternship",
+    "实习": "empInternship",
+    "voluntario": "empVolunteer",
+    "volunteer": "empVolunteer",
+    "voluntariado": "empVolunteer",
+    "benevolat": "empVolunteer",
+    "volontariato": "empVolunteer",
+    "ehrenamt": "empVolunteer",
+    "волонтерство": "empVolunteer",
+    "志愿者": "empVolunteer",
+    "outro": "empOther",
+    "other": "empOther",
+    "otro": "empOther",
+    "autre": "empOther",
+    "altro": "empOther",
+    "sonstiges": "empOther",
+    "другое": "empOther",
+    "其他": "empOther",
+  };
+
+  const EXPERIENCE_CODE_KEYS = {
+    internship: "lvlInternship",
+    entry_level: "lvlEntryLevel",
+    associate: "lvlAssociate",
+    mid_senior: "lvlMidSenior",
+    director: "lvlDirector",
+    executive: "lvlExecutive",
+    not_applicable: "lvlNotApplicable",
+  };
+
+  const EXPERIENCE_TEXT_MAP = {
+    "estagio": "lvlInternship",
+    "internship": "lvlInternship",
+    "practicas": "lvlInternship",
+    "stage": "lvlInternship",
+    "tirocinio": "lvlInternship",
+    "praktikum": "lvlInternship",
+    "стажировка": "lvlInternship",
+    "实习": "lvlInternship",
+    "junior": "lvlEntryLevel",
+    "entry level": "lvlEntryLevel",
+    "sin experiencia": "lvlEntryLevel",
+    "sin experiencia previa": "lvlEntryLevel",
+    "debutant": "lvlEntryLevel",
+    "livello base": "lvlEntryLevel",
+    "einstiegsposition": "lvlEntryLevel",
+    "начальный уровень": "lvlEntryLevel",
+    "初级": "lvlEntryLevel",
+    "assistente": "lvlAssociate",
+    "associate": "lvlAssociate",
+    "algo de responsabilidad": "lvlAssociate",
+    "premier emploi": "lvlAssociate",
+    "livello intermedio": "lvlAssociate",
+    "mitarbeiter": "lvlAssociate",
+    "специалист": "lvlAssociate",
+    "助理": "lvlAssociate",
+    "pleno-senior": "lvlMidSenior",
+    "mid-senior level": "lvlMidSenior",
+    "mid senior level": "lvlMidSenior",
+    "intermedio": "lvlMidSenior",
+    "confirme": "lvlMidSenior",
+    "medio-alto": "lvlMidSenior",
+    "mittleres management": "lvlMidSenior",
+    "berufserfahren": "lvlMidSenior",
+    "руководитель среднего звена": "lvlMidSenior",
+    "中高级": "lvlMidSenior",
+    "diretor": "lvlDirector",
+    "director": "lvlDirector",
+    "direttore": "lvlDirector",
+    "direktor": "lvlDirector",
+    "директор": "lvlDirector",
+    "总监": "lvlDirector",
+    "executivo": "lvlExecutive",
+    "executive": "lvlExecutive",
+    "ejecutivo": "lvlExecutive",
+    "cadre dirigeant": "lvlExecutive",
+    "dirigente": "lvlExecutive",
+    "geschaftsfuhrung": "lvlExecutive",
+    "руководитель": "lvlExecutive",
+    "高管": "lvlExecutive",
+    "nao aplicavel": "lvlNotApplicable",
+    "not applicable": "lvlNotApplicable",
+    "no aplicable": "lvlNotApplicable",
+    "non applicable": "lvlNotApplicable",
+    "non applicabile": "lvlNotApplicable",
+    "nicht zutreffend": "lvlNotApplicable",
+    "не применимо": "lvlNotApplicable",
+    "不适用": "lvlNotApplicable",
+  };
+
+  function normalizeLookup(val) {
+    return String(val || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  function translateEmploymentType(job) {
+    if (job.employment_type_code && EMPLOYMENT_CODE_KEYS[job.employment_type_code]) {
+      return t(EMPLOYMENT_CODE_KEYS[job.employment_type_code]);
+    }
+    const raw =
+      job["Tipo de emprego"] ||
+      job["Employment type"] ||
+      job["Tipo de empleo"] ||
+      job["Type d'emploi"] ||
+      job["Tipo di impiego"] ||
+      job["Beschäftigungsart"] ||
+      job["Тип занятости"] ||
+      job["雇佣类型"] ||
+      "";
+    if (!raw) return "";
+    const key = EMPLOYMENT_TEXT_MAP[normalizeLookup(raw)];
+    return key ? t(key) : raw;
+  }
+
+  function translateExperienceLevel(job) {
+    if (job.experience_level_code && EXPERIENCE_CODE_KEYS[job.experience_level_code]) {
+      return t(EXPERIENCE_CODE_KEYS[job.experience_level_code]);
+    }
+    const raw =
+      job["Nível de experiência"] ||
+      job["Seniority level"] ||
+      job["Nivel de antigüedad"] ||
+      job["Niveau hiérarchique"] ||
+      job["Livello di anzianità"] ||
+      job["Karrierestufe"] ||
+      job["Уровень"] ||
+      job["Уровень опыта"] ||
+      job["职级"] ||
+      job["经验级别"] ||
+      "";
+    if (!raw) return "";
+    const key = EXPERIENCE_TEXT_MAP[normalizeLookup(raw)];
+    return key ? t(key) : raw;
+  }
+
+  function formatRelativeTime(rawTime) {
+    if (!rawTime) return "";
+    const normalized = String(rawTime).replace(/\u00a0/g, " ").trim();
+    const lower = normalized.toLowerCase();
+
+    if (/^(?:just now|agora(?: mesmo)?|ahora(?: mismo)?|à l'instant|proprio ora|gerade(?: eben)?|только что|刚刚|hoje|today|hoy|aujourd'hui|oggi|heute|сегодня|今天)$/i.test(lower)) {
+      return t("timeJustNow");
+    }
+    if (/^(?:ontem|yesterday|ayer|hier|ieri|gestern|вчера|昨天)$/i.test(lower)) {
+      return t("timeDaySingular");
+    }
+
+    const numMatch = lower.match(/\d+/);
+    const n = numMatch ? parseInt(numMatch[0], 10) : 1;
+
+    const unitRules = [
+      { re: /\bmin(?:ut[eo]s?|uten?)?\b|минут|мин\.|分钟/i, singular: "timeMinuteSingular", plural: "timeMinutePlural" },
+      { re: /\b(?:hora?s?|hours?|heures?|ore|stunden?)\b|час|小时/i, singular: "timeHourSingular", plural: "timeHourPlural" },
+      { re: /\b(?:d[ií]as?|days?|jours?|giorn[io]|tag(?:en?)?)\b|день|дня|дней|дн\.|天/i, singular: "timeDaySingular", plural: "timeDayPlural" },
+      { re: /\b(?:semanas?|weeks?|semaines?|settiman[ae]|wochen?)\b|недел|нед\.|周/i, singular: "timeWeekSingular", plural: "timeWeekPlural" },
+      { re: /\b(?:m[eê]s(?:es)?|months?|mois|mes[ei]|monat(?:en?)?)\b|месяц|мес\.|个月|月/i, singular: "timeMonthSingular", plural: "timeMonthPlural" },
+      { re: /\b(?:anos?|años?|years?|ans?|ann[ée]es?|ann[io]|jahr(?:en?)?)\b|год|года|лет|г\.|年/i, singular: "timeYearSingular", plural: "timeYearPlural" },
+    ];
+
+    for (const rule of unitRules) {
+      if (rule.re.test(lower)) {
+        return n === 1 ? t(rule.singular) : t(rule.plural, { n });
+      }
+    }
+    return normalized;
+  }
+
   function createJobCard(job, index = 0, isSeen = false) {
     const card = document.createElement("article");
     card.className = `result-card${isSeen ? " is-seen" : ""}`;
@@ -609,7 +906,8 @@ document.addEventListener("DOMContentLoaded", () => {
     kickerRow.className = "card-kicker-row";
     const kicker = document.createElement("span");
     kicker.className = "card-kicker";
-    kicker.textContent = `${String(index + 1).padStart(2, "0")} · ${job["Tipo de emprego"] || t("cardJobFallback")}`;
+    const employmentType = translateEmploymentType(job);
+    kicker.textContent = `${String(index + 1).padStart(2, "0")} · ${employmentType || t("cardJobFallback")}`;
     kickerRow.appendChild(kicker);
 
     if (isSeen) {
@@ -631,10 +929,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const badges = document.createElement("div");
     badges.className = "card-badges";
+    const formattedTime = formatRelativeTime(job.time);
+    const experienceLevel = translateExperienceLevel(job);
     if (job.location) badges.appendChild(createMetaBadge("bi bi-geo-alt", job.location));
-    if (job.time) badges.appendChild(createMetaBadge("bi bi-clock", job.time));
-    if (job["Nível de experiência"]) {
-      badges.appendChild(createMetaBadge("bi bi-bar-chart", job["Nível de experiência"]));
+    if (formattedTime) badges.appendChild(createMetaBadge("bi bi-clock", formattedTime));
+    if (experienceLevel) {
+      badges.appendChild(createMetaBadge("bi bi-bar-chart", experienceLevel));
     }
 
     top.append(kickerRow, header);
@@ -674,16 +974,20 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function openJobModal(job) {
+    activeModalJob = job;
     modalTitle.textContent = job.title || t("cardTitleFallback");
     modalCompany.textContent = job.company || "";
     modalBadges.innerHTML = "";
+    const formattedTime = formatRelativeTime(job.time);
+    const experienceLevel = translateExperienceLevel(job);
+    const employmentType = translateEmploymentType(job);
     if (job.location) modalBadges.appendChild(createMetaBadge("bi bi-geo-alt", job.location));
-    if (job.time) modalBadges.appendChild(createMetaBadge("bi bi-clock", job.time));
-    if (job["Nível de experiência"]) {
-      modalBadges.appendChild(createMetaBadge("bi bi-bar-chart", job["Nível de experiência"]));
+    if (formattedTime) modalBadges.appendChild(createMetaBadge("bi bi-clock", formattedTime));
+    if (experienceLevel) {
+      modalBadges.appendChild(createMetaBadge("bi bi-bar-chart", experienceLevel));
     }
-    if (job["Tipo de emprego"]) {
-      modalBadges.appendChild(createMetaBadge("bi bi-briefcase", job["Tipo de emprego"]));
+    if (employmentType) {
+      modalBadges.appendChild(createMetaBadge("bi bi-briefcase", employmentType));
     }
 
     modalDescription.textContent = job.description || t("modalNoDesc");
@@ -692,6 +996,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function closeModal() {
+    activeModalJob = null;
     jobModal.style.display = "none";
   }
 
@@ -706,8 +1011,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateStatusBar(data) {
+    lastStatusPayload = data;
     const pct = Math.round(data.progress || 0);
-    statusText.textContent = data.status_message || t("statusSearching");
+    const translatedStatus =
+      data.status_code && I18N[currentLang]?.[data.status_code]
+        ? t(data.status_code, data.status_params || {})
+        : data.status_message || t("statusSearching");
+    statusText.textContent = translatedStatus;
     statusPercent.textContent = `${pct}%`;
     progressBar.style.width = `${pct}%`;
   }
@@ -719,6 +1029,8 @@ document.addEventListener("DOMContentLoaded", () => {
     statusSection.style.display = searching ? "flex" : "none";
     if (searching) {
       lastCollectedCount = -1;
+      lastStatusPayload = { status_code: "statusPreparing", status_params: {}, progress: 0 };
+      statusText.textContent = t("statusPreparing");
       progressBar.style.width = "0%";
       statusPercent.textContent = "0%";
       searchResults = [];
@@ -753,7 +1065,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ type: "jobs" }),
       });
     } catch (error) {
-      showFeedback(`${t("errStop")}${error.message}`);
+      showFeedback(error.message, null, {}, "errStop");
     } finally {
       setIdleState();
     }
