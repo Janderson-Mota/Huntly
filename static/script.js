@@ -39,6 +39,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const modalTitle = document.getElementById("modal-title");
   const modalCompany = document.getElementById("modal-company");
   const modalBadges = document.getElementById("modal-badges");
+  const modalTranslatingIndicator = document.getElementById("modal-translating-indicator");
   const modalDescription = document.getElementById("modal-description");
   const modalLink = document.getElementById("modal-link");
 
@@ -211,6 +212,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const ITEMS_PER_PAGE = 9;
+  const CARD_TRANSLATION_CHUNK_SIZE = 3;
   const SESSION_TRANSLATIONS_KEY = "huntly_translations_cache_v3";
   const MAX_SESSION_TRANSLATIONS = 200;
   let isSearching = false;
@@ -281,29 +283,8 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  async function ensureTranslations(jobsToTranslate, options = {}) {
-    if (!Array.isArray(jobsToTranslate) || !jobsToTranslate.length) {
-      return;
-    }
-    const mode = options.mode === "preview" ? "preview" : "full";
-    const silent = Boolean(options.silent);
-    const targetLang = currentLang;
-
-    const pendingJobs = jobsToTranslate.filter((job) => {
-      if (!job || !job.id || (!job.title && !job.description)) return false;
-      const cacheKey = `${targetLang}:${job.id}`;
-      const cached = translationCache.get(cacheKey);
-      const fullInFlight = translationInFlight.has(`${targetLang}:full:${job.id}`);
-      const previewInFlight = translationInFlight.has(`${targetLang}:preview:${job.id}`);
-      if (mode === "preview") {
-        return !cached && !previewInFlight && !fullInFlight;
-      }
-      return !(cached && cached.is_full) && !fullInFlight;
-    });
-    if (!pendingJobs.length) return;
-
-    const batch = pendingJobs.slice(0, 20);
-    const jobIds = batch.map((job) => String(job.id));
+  async function _translateChunk(chunkJobs, targetLang, mode, silent) {
+    const jobIds = chunkJobs.map((job) => String(job.id));
     const flightKeys = jobIds.map((jid) => `${targetLang}:${mode}:${jid}`);
     flightKeys.forEach((key) => translationInFlight.add(key));
 
@@ -358,10 +339,18 @@ document.addEventListener("DOMContentLoaded", () => {
         saveSessionTranslations();
         if (currentLang === targetLang) {
           if (!silent) {
-            renderFilteredResults();
+            const hasQuickOrExclude = Boolean(
+              quickFilterInput.value.trim() ||
+              (excludeFilterInput && excludeFilterInput.value.trim())
+            );
+            if (mode === "preview" && !hasQuickOrExclude) {
+              chunkJobs.forEach(updateCardElementInPlace);
+            } else {
+              renderFilteredResults({ skipTranslation: true });
+            }
           }
           if (jobModal.style.display !== "none" && activeModalJob && translations[String(activeModalJob.id)]) {
-            openJobModal(activeModalJob);
+            populateModalContent(activeModalJob);
           }
         }
       }
@@ -370,6 +359,40 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       flightKeys.forEach((key) => translationInFlight.delete(key));
     }
+  }
+
+  async function ensureTranslations(jobsToTranslate, options = {}) {
+    if (!Array.isArray(jobsToTranslate) || !jobsToTranslate.length) {
+      return;
+    }
+    const mode = options.mode === "preview" ? "preview" : "full";
+    const silent = Boolean(options.silent);
+    const targetLang = currentLang;
+
+    const pendingJobs = jobsToTranslate.filter((job) => {
+      if (!job || !job.id || (!job.title && !job.description)) return false;
+      const cacheKey = `${targetLang}:${job.id}`;
+      const cached = translationCache.get(cacheKey);
+      const fullInFlight = translationInFlight.has(`${targetLang}:full:${job.id}`);
+      const previewInFlight = translationInFlight.has(`${targetLang}:preview:${job.id}`);
+      if (mode === "preview") {
+        return !cached && !previewInFlight && !fullInFlight;
+      }
+      return !(cached && cached.is_full) && !fullInFlight;
+    });
+    if (!pendingJobs.length) return;
+
+    const batch = pendingJobs.slice(0, 20);
+    if (mode === "preview" && batch.length > CARD_TRANSLATION_CHUNK_SIZE) {
+      const chunks = [];
+      for (let idx = 0; idx < batch.length; idx += CARD_TRANSLATION_CHUNK_SIZE) {
+        chunks.push(batch.slice(idx, idx + CARD_TRANSLATION_CHUNK_SIZE));
+      }
+      await Promise.all(chunks.map((chunk) => _translateChunk(chunk, targetLang, mode, silent)));
+      return;
+    }
+
+    await _translateChunk(batch, targetLang, mode, silent);
   }
 
   function readStorage(key, fallback) {
@@ -743,25 +766,27 @@ document.addEventListener("DOMContentLoaded", () => {
         data.status === "complete" ||
         data.progress === 100 ||
         data.status === "stopped" ||
+        data.status === "error" ||
         !data.is_searching;
+
+      if (isTerminal) {
+        if (data.status === "error") {
+          if (data.status_code && I18N[currentLang]?.[data.status_code]) {
+            showFeedback("", data.status_code, data.status_params || {});
+          } else {
+            showFeedback(data.status_message || t("errGeneric"), "errGeneric");
+          }
+        }
+        // Clear searching state before fetching final results so post-load translation kicks in immediately.
+        setIdleState();
+      }
 
       if (collectedCount !== lastCollectedCount || isTerminal) {
         lastCollectedCount = collectedCount;
         await fetchResults();
       }
 
-      if (data.status === "complete" || data.progress === 100) {
-        setIdleState();
-      } else if (data.status === "error") {
-        if (data.status_code && I18N[currentLang]?.[data.status_code]) {
-          showFeedback("", data.status_code, data.status_params || {});
-        } else {
-          showFeedback(data.status_message || t("errGeneric"), "errGeneric");
-        }
-        setIdleState();
-      } else if (data.status === "stopped" || !data.is_searching) {
-        setIdleState();
-      } else {
+      if (!isTerminal) {
         pollTimeout = setTimeout(pollResults, 900);
       }
     } catch (error) {
@@ -814,7 +839,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function renderFilteredResults() {
+  function renderFilteredResults(options = {}) {
+    const { skipTranslation = false } = options || {};
     clearPrefetch();
     const hasResults = searchResults.length > 0;
     const { matched, recommended } = splitResultsByTab();
@@ -930,16 +956,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     renderPagination(filtered.length, totalPages);
-    ensureTranslations(pageItems, { mode: "preview" });
     clearPrefetch();
-    if (!isSearching && currentPage < totalPages) {
-      const nextStart = currentPage * ITEMS_PER_PAGE;
-      const nextPageItems = filtered.slice(nextStart, nextStart + ITEMS_PER_PAGE);
-      if (nextPageItems.length > 0) {
-        prefetchTimeout = setTimeout(() => {
-          prefetchTimeout = null;
-          ensureTranslations(nextPageItems, { mode: "preview", silent: true });
-        }, 180);
+    if (!skipTranslation && !isSearching) {
+      ensureTranslations(pageItems, { mode: "preview" });
+      if (currentPage < totalPages) {
+        const nextStart = currentPage * ITEMS_PER_PAGE;
+        const nextPageItems = filtered.slice(nextStart, nextStart + ITEMS_PER_PAGE);
+        if (nextPageItems.length > 0) {
+          prefetchTimeout = setTimeout(() => {
+            prefetchTimeout = null;
+            ensureTranslations(nextPageItems, { mode: "preview", silent: true });
+          }, 180);
+        }
       }
     }
   }
@@ -1285,6 +1313,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const displayJob = getDisplayJob(job);
     const card = document.createElement("article");
     card.className = `result-card${isSeen ? " is-seen" : ""}`;
+    if (job.id) card.dataset.jobId = String(job.id);
     const safeLink = getSafeUrl(job.link);
 
     if (safeLink !== "#") {
@@ -1380,8 +1409,62 @@ document.addEventListener("DOMContentLoaded", () => {
     return card;
   }
 
-  function openJobModal(job) {
-    activeModalJob = job;
+  function updateCardElementInPlace(job) {
+    if (!job || !job.id || !resultsGrid) return;
+    const targetId = String(job.id);
+    const card = Array.from(resultsGrid.children).find((el) => el.dataset && el.dataset.jobId === targetId);
+    if (!card) return;
+
+    const displayJob = getDisplayJob(job);
+    const titleEl = card.querySelector(".card-title");
+    if (titleEl) {
+      titleEl.textContent = displayJob.title || t("cardTitleFallback");
+    }
+
+    const cardExcerptText = displayJob.excerpt || displayJob.description;
+    const existingExcerpt = card.querySelector(".card-excerpt");
+    if (cardExcerptText) {
+      if (existingExcerpt) {
+        existingExcerpt.textContent = cardExcerptText;
+      } else {
+        const top = card.firstElementChild;
+        const badgesEl = card.querySelector(".card-badges");
+        if (top && badgesEl) {
+          const excerpt = document.createElement("p");
+          excerpt.className = "card-excerpt";
+          excerpt.textContent = cardExcerptText;
+          top.insertBefore(excerpt, badgesEl);
+        }
+      }
+    }
+
+    const badges = card.querySelector(".card-badges");
+    if (badges) {
+      const existingTrBadge = badges.querySelector(".translated-badge");
+      const translationBadgeText = formatTranslationBadge(displayJob);
+      if (translationBadgeText) {
+        if (existingTrBadge) {
+          const icon = document.createElement("i");
+          icon.className = "bi bi-translate";
+          existingTrBadge.replaceChildren(icon, document.createTextNode(translationBadgeText));
+        } else {
+          const trBadge = createMetaBadge("bi bi-translate", translationBadgeText);
+          trBadge.classList.add("translated-badge");
+          badges.appendChild(trBadge);
+        }
+      } else if (existingTrBadge) {
+        existingTrBadge.remove();
+      }
+    }
+  }
+
+  function setModalTranslating(active) {
+    if (modalTranslatingIndicator) {
+      modalTranslatingIndicator.style.display = active ? "inline-flex" : "none";
+    }
+  }
+
+  function populateModalContent(job) {
     const displayJob = getDisplayJob(job);
     modalTitle.textContent = displayJob.title || t("cardTitleFallback");
     modalCompany.textContent = job.company || "";
@@ -1410,12 +1493,41 @@ document.addEventListener("DOMContentLoaded", () => {
 
     modalDescription.textContent = displayJob.description || t("modalNoDesc");
     modalLink.href = getSafeUrl(job.link);
+  }
+
+  async function openJobModal(job) {
+    activeModalJob = job;
+    populateModalContent(job);
     jobModal.style.display = "flex";
-    ensureTranslations([job], { mode: "full" });
+
+    const cached = translationCache.get(`${currentLang}:${job.id}`);
+    const needsFullDesc = Boolean(job.description) && !(cached && cached.is_full);
+    setModalTranslating(needsFullDesc);
+    if (!needsFullDesc && cached) return;
+
+    const requestedJobId = String(job.id);
+    const requestedLang = currentLang;
+    try {
+      await ensureTranslations([job], { mode: "full", silent: true });
+      if (
+        jobModal.style.display !== "none" &&
+        activeModalJob &&
+        String(activeModalJob.id) === requestedJobId &&
+        currentLang === requestedLang
+      ) {
+        populateModalContent(activeModalJob);
+        updateCardElementInPlace(activeModalJob);
+      }
+    } finally {
+      if (!activeModalJob || (String(activeModalJob.id) === requestedJobId && currentLang === requestedLang)) {
+        setModalTranslating(false);
+      }
+    }
   }
 
   function closeModal() {
     activeModalJob = null;
+    setModalTranslating(false);
     jobModal.style.display = "none";
   }
 
@@ -1491,6 +1603,9 @@ document.addEventListener("DOMContentLoaded", () => {
       showFeedback(error.message, null, {}, "errStop");
     } finally {
       setIdleState();
+      if (searchResults.length > 0) {
+        renderFilteredResults();
+      }
     }
   }
 });

@@ -361,7 +361,7 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       'emptyTabMatchedTitle', 'emptyTabMatchedDesc',
       'emptyTabRecommendedTitle', 'emptyTabRecommendedDesc',
       'labelLimitJobs', 'limit25', 'limit50',
-      'translatedFromTo',
+      'translatedFromTo', 'modalTranslating',
       'ariaMainNav', 'ariaFooter', 'footerRights'
     ];
     for (const l of langs) {
@@ -635,6 +635,8 @@ def test_home_renders_minimalist_footer(client):
     html = res.data.decode("utf-8")
     assert 'class="navbar-nav"' in html
     assert 'class="navbar-controls"' in html
+    assert 'id="modal-translating-indicator"' in html
+    assert 'data-i18n="modalTranslating"' in html
     assert '<footer class="site-footer"' in html
     assert 'data-i18n="footerRights"' in html
     footer_start = html.index('<footer class="site-footer"')
@@ -797,6 +799,71 @@ def test_description_semantics_match_role_and_ignore_incidental_mentions():
     assert detect_description_experience_levels(incidental_mentions["description"]) == set()
     assert classify_job_match(incidental_mentions, experience_level=["5,6"]) == "recommended"
     assert classify_job_match(incidental_mentions, experience_level=["2"]) == "recommended"
+
+
+def test_translate_endpoint_post_load_batch_cache_and_safe_fallback(client):
+    import translator
+
+    translator.clear_cache()
+    jobs_state.set_results(
+        [
+            {
+                "id": "950",
+                "title": "Senior Backend Engineer",
+                "description": "Build scalable Python APIs " + ("and distributed services " * 25),
+            },
+            {
+                "id": "951",
+                "title": "Frontend Engineer",
+                "description": "Short UI role",
+            },
+        ]
+    )
+
+    calls = []
+
+    class FakeResp:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[[f"[PT] {self.text}", self.text]], None, "en"]
+
+    def fake_post(url, params=None, data=None, headers=None, timeout=8):
+        calls.append(data["q"])
+        return FakeResp(data["q"])
+
+    with patch("translator.requests.post", side_effect=fake_post):
+        first = client.post("/translate", json={"lang": "pt", "mode": "preview", "job_ids": ["950", "951"]})
+        assert first.status_code == 200
+        first_data = first.get_json()
+        assert first_data["mode"] == "preview"
+        assert first_data["translations"]["950"]["title"] == "[PT] Senior Backend Engineer"
+        assert first_data["translations"]["950"]["is_full"] is False
+        assert first_data["translations"]["950"]["description"] is None
+        assert first_data["translations"]["951"]["title"] == "[PT] Frontend Engineer"
+        assert len(calls) == 4
+
+        # Second identical batch hits backend LRU cache with zero HTTP calls
+        calls.clear()
+        second = client.post("/translate", json={"lang": "pt", "mode": "preview", "job_ids": ["950", "951"]})
+        assert second.status_code == 200
+        assert second.get_json() == first_data
+        assert calls == []
+
+    # Network failure during on-demand full modal translation falls back safely to original text
+    translator.clear_cache()
+    with patch("translator.requests.post", side_effect=RuntimeError("translation upstream timeout")):
+        fallback = client.post("/translate", json={"lang": "pt", "mode": "full", "job_ids": ["951"]})
+        assert fallback.status_code == 200
+        fb_data = fallback.get_json()
+        assert fb_data["translations"]["951"]["title"] == "Frontend Engineer"
+        assert fb_data["translations"]["951"]["description"] == "Short UI role"
+        assert fb_data["translations"]["951"]["was_translated"] is False
+
 
 
 
