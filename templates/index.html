@@ -95,25 +95,65 @@
             </div>
 
             <div class="form-group">
-              <label for="experience_level" data-i18n="labelExperience">Nível de experiência</label>
-              <select name="experience_level" class="form-control" id="experience_level">
-                <option value="" selected data-i18n="expAll">Todos os níveis</option>
-                <option value="1" data-i18n="expIntern">Estágio</option>
-                <option value="2" data-i18n="expJunior">Júnior</option>
-                <option value="3,4" data-i18n="expMid">Pleno</option>
-                <option value="4" data-i18n="expSenior">Sênior</option>
-                <option value="5,6" data-i18n="expDirector">Diretor</option>
-              </select>
+              <label for="experience_level_btn" data-i18n="labelExperience">Nível de experiência</label>
+              <div class="multi-select" id="experience-multiselect" data-name="experience_level" data-default-key="expAll">
+                <button type="button" class="form-control multi-select-trigger" id="experience_level_btn"
+                  aria-haspopup="listbox" aria-expanded="false"
+                  aria-label="Selecionar níveis de experiência" data-i18n-aria-label="ariaExperienceMulti">
+                  <span class="multi-select-label" data-i18n="expAll">Todos os níveis</span>
+                  <span class="multi-select-count" style="display: none"></span>
+                  <i class="bi bi-chevron-down multi-select-caret"></i>
+                </button>
+                <div class="multi-select-menu" role="group" aria-label="Nível de experiência" data-i18n-aria-label="labelExperience">
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="experience_level" value="1" />
+                    <span data-i18n="expIntern">Estágio</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="experience_level" value="2" />
+                    <span data-i18n="expJunior">Júnior</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="experience_level" value="3,4" />
+                    <span data-i18n="expMid">Pleno</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="experience_level" value="4" />
+                    <span data-i18n="expSenior">Sênior</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="experience_level" value="5,6" />
+                    <span data-i18n="expDirector">Diretor</span>
+                  </label>
+                </div>
+              </div>
             </div>
 
             <div class="form-group">
-              <label for="place" data-i18n="labelPlace">Modalidade de trabalho</label>
-              <select name="place" class="form-control" id="place">
-                <option value="" selected data-i18n="placeAll">Todas as modalidades</option>
-                <option value="2" data-i18n="placeRemote">Remoto</option>
-                <option value="3" data-i18n="placeHybrid">Híbrido</option>
-                <option value="1" data-i18n="placeOnsite">Presencial</option>
-              </select>
+              <label for="work_mode_btn" data-i18n="labelPlace">Modalidade de trabalho</label>
+              <div class="multi-select" id="work-mode-multiselect" data-name="work_mode" data-default-key="placeAll">
+                <button type="button" class="form-control multi-select-trigger" id="work_mode_btn"
+                  aria-haspopup="listbox" aria-expanded="false"
+                  aria-label="Selecionar modalidades de trabalho" data-i18n-aria-label="ariaWorkModeMulti">
+                  <span class="multi-select-label" data-i18n="placeAll">Todas as modalidades</span>
+                  <span class="multi-select-count" style="display: none"></span>
+                  <i class="bi bi-chevron-down multi-select-caret"></i>
+                </button>
+                <div class="multi-select-menu" role="group" aria-label="Modalidade de trabalho" data-i18n-aria-label="labelPlace">
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="work_mode" value="2" />
+                    <span data-i18n="placeRemote">Remoto</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="work_mode" value="3" />
+                    <span data-i18n="placeHybrid">Híbrido</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="work_mode" value="1" />
+                    <span data-i18n="placeOnsite">Presencial</span>
+                  </label>
+                </div>
+              </div>
             </div>
 
             <div class="form-group">

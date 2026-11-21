@@ -4,7 +4,7 @@ import math
 import re
 import threading
 from time import sleep
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import unicodedata
 from urllib.parse import urlencode, urlparse
 
@@ -641,18 +641,37 @@ def calculate_time_range(max_date: Optional[str]) -> str:
     return ""
 
 
+def _flatten_filter_codes(values: Optional[Union[str, List[str]]]) -> List[str]:
+    """Expand list or comma-separated filter values into unique LinkedIn codes preserving order."""
+    if not values:
+        return []
+    raw_items = [values] if isinstance(values, str) else list(values)
+    seen: set[str] = set()
+    codes: List[str] = []
+    for item in raw_items:
+        if item is None:
+            continue
+        for part in str(item).split(","):
+            code = part.strip()
+            if code and code not in seen:
+                seen.add(code)
+                codes.append(code)
+    return codes
+
+
 def build_params(
     keywords: str,
     location: str,
     time_range: str,
     distance: str,
     job_type: List[str],
-    place: List[str],
+    place: Union[List[str], str],
     start: int = 0,
-    experience_level: Optional[List[str]] = None,
+    experience_level: Optional[Union[List[str], str]] = None,
     sort_by: str = "",
     easy_apply: bool = False,
     geo_id: str = "",
+    work_mode: Optional[Union[List[str], str]] = None,
 ) -> str:
     """Build properly URL-encoded query string for LinkedIn job search."""
     params: List[tuple[str, str]] = [
@@ -685,10 +704,12 @@ def build_params(
         params.append(("distance", str(distance)))
     if job_type:
         params.append(("f_JT", ",".join(job_type)))
-    if place:
-        params.append(("f_WT", ",".join(place)))
-    if experience_level:
-        params.append(("f_E", ",".join(experience_level)))
+    place_codes = _flatten_filter_codes(work_mode if work_mode is not None else place)
+    if place_codes:
+        params.append(("f_WT", ",".join(place_codes)))
+    exp_codes = _flatten_filter_codes(experience_level)
+    if exp_codes:
+        params.append(("f_E", ",".join(exp_codes)))
     if easy_apply:
         params.append(("f_AL", "true"))
 

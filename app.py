@@ -73,6 +73,40 @@ def _parse_str_list(raw_value: Any) -> List[str]:
     return [str(item).strip() for item in raw_value if item is not None and str(item).strip()]
 
 
+def _parse_multi_filter(raw_value: Any) -> List[str]:
+    """Parse list or comma-separated string filter while preserving compound tokens like '3,4'."""
+    if raw_value is None or raw_value == "":
+        return []
+    values: List[str] = []
+    if isinstance(raw_value, str):
+        trimmed = raw_value.strip()
+        if not trimmed:
+            return []
+        if trimmed in ("3,4", "5,6"):
+            values = [trimmed]
+        else:
+            values = [part.strip() for part in trimmed.split(",") if part.strip()]
+    elif isinstance(raw_value, list):
+        for item in raw_value:
+            if item is None:
+                continue
+            if isinstance(item, (dict, list, bool)):
+                raise _ValidationError("Filtro deve ser uma lista.", "errInvalidFilterList")
+            cleaned = str(item).strip()
+            if cleaned:
+                values.append(cleaned)
+    else:
+        raise _ValidationError("Filtro deve ser uma lista.", "errInvalidFilterList")
+
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for val in values:
+        if val not in seen:
+            seen.add(val)
+            deduped.append(val)
+    return deduped
+
+
 def _parse_bool(raw_value: Any, default: bool = False) -> bool:
     if raw_value is None or raw_value == "":
         return default
@@ -122,8 +156,9 @@ def start_search():
         distance = _parse_str(params.get("distance"), max_len=10)
         sort_by = _parse_str(params.get("sort_by"), max_len=10).upper()
         job_type = _parse_str_list(params.get("job_type"))
-        place = _parse_str_list(params.get("place"))
-        experience_level = _parse_str_list(params.get("experience_level"))
+        raw_work_mode = params.get("work_mode") if "work_mode" in params else params.get("place")
+        place = _parse_multi_filter(raw_work_mode)
+        experience_level = _parse_multi_filter(params.get("experience_level"))
         easy_apply = _parse_bool(params.get("easy_apply"), default=False)
         limit_jobs = _parse_limit(params.get("limit_jobs"), default=100)
         lang = _parse_str(params.get("lang"), max_len=10).lower() or "en"

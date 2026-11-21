@@ -10,6 +10,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const stateSelect = document.getElementById("state");
   const cityInput = document.getElementById("city");
   const cityDatalist = document.getElementById("city-suggestions");
+  const experienceMultiselect = document.getElementById("experience-multiselect");
+  const workModeMultiselect = document.getElementById("work-mode-multiselect");
+  const multiSelects = [experienceMultiselect, workModeMultiselect].filter(Boolean);
 
   const statusSection = document.getElementById("status-section");
   const statusText = document.querySelector(".status-text");
@@ -180,6 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     populateRoleSuggestions();
+    updateAllMultiSelects();
 
     if (countrySelect && countrySelect.options.length > 0) {
       Array.from(countrySelect.options).forEach((opt, idx) => {
@@ -414,6 +418,89 @@ document.addEventListener("DOMContentLoaded", () => {
       .join(", ");
   }
 
+  function updateMultiSelectDisplay(container) {
+    if (!container) return;
+    const labelEl = container.querySelector(".multi-select-label");
+    const countEl = container.querySelector(".multi-select-count");
+    const defaultKey = container.dataset.defaultKey || "";
+    const checked = Array.from(container.querySelectorAll('input[type="checkbox"]:checked'));
+
+    if (checked.length === 0) {
+      if (labelEl) labelEl.textContent = defaultKey ? t(defaultKey) : "";
+      if (countEl) {
+        countEl.textContent = "";
+        countEl.style.display = "none";
+      }
+      return;
+    }
+
+    const labels = checked.map((cb) => {
+      const span = cb.closest(".multi-select-option")?.querySelector("span");
+      return span ? span.textContent.trim() : cb.value;
+    });
+    if (labelEl) labelEl.textContent = labels.join(", ");
+    if (countEl) {
+      if (checked.length >= 2) {
+        countEl.textContent = String(checked.length);
+        countEl.style.display = "inline-flex";
+      } else {
+        countEl.textContent = "";
+        countEl.style.display = "none";
+      }
+    }
+  }
+
+  function updateAllMultiSelects() {
+    multiSelects.forEach(updateMultiSelectDisplay);
+  }
+
+  function closeAllMultiSelects(exceptContainer = null) {
+    multiSelects.forEach((container) => {
+      if (container !== exceptContainer) {
+        container.classList.remove("is-open");
+        const trigger = container.querySelector(".multi-select-trigger");
+        if (trigger) trigger.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+
+  function getMultiSelectValues(container) {
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+      .map((cb) => cb.value)
+      .filter(Boolean);
+  }
+
+  function resetMultiSelects() {
+    multiSelects.forEach((container) => {
+      container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.checked = false;
+      });
+    });
+    closeAllMultiSelects();
+    updateAllMultiSelects();
+  }
+
+  multiSelects.forEach((container) => {
+    const trigger = container.querySelector(".multi-select-trigger");
+    if (trigger) {
+      trigger.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const willOpen = !container.classList.contains("is-open");
+        closeAllMultiSelects(willOpen ? container : null);
+        container.classList.toggle("is-open", willOpen);
+        trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      });
+    }
+    container.addEventListener("change", () => updateMultiSelectDisplay(container));
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".multi-select")) {
+      closeAllMultiSelects();
+    }
+  });
+
   // Event Listeners
   countrySelect.addEventListener("change", () => populateStates(countrySelect.value));
   stateSelect.addEventListener("change", () => {
@@ -447,7 +534,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.target === jobModal) closeModal();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && jobModal.style.display !== "none") closeModal();
+    if (e.key === "Escape") {
+      closeAllMultiSelects();
+      if (jobModal.style.display !== "none") closeModal();
+    }
   });
 
   if (langSelect) {
@@ -494,6 +584,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function resetFilters() {
     searchForm.reset();
+    resetMultiSelects();
     initLocationCascade();
     quickFilterInput.value = "";
     if (excludeFilterInput) excludeFilterInput.value = "";
@@ -506,8 +597,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function getFormData() {
     const formData = new FormData(searchForm);
-    const place = formData.get("place");
-    const expLevel = formData.get("experience_level");
+    const workModes = getMultiSelectValues(workModeMultiselect);
+    const experienceLevels = getMultiSelectValues(experienceMultiselect);
     return {
       type: "jobs",
       lang: currentLang,
@@ -517,8 +608,9 @@ document.addEventListener("DOMContentLoaded", () => {
       sort_by: formData.get("sort_by") || "R",
       distance: "",
       job_type: [],
-      place: place ? [place] : [],
-      experience_level: expLevel ? expLevel.split(",") : [],
+      work_mode: workModes,
+      place: workModes,
+      experience_level: experienceLevels,
       easy_apply: Boolean(easyApplyCheckbox && easyApplyCheckbox.checked),
       limit_jobs: 100,
     };
