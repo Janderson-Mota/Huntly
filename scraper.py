@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import math
+import re
 import threading
 from time import sleep
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import unicodedata
 from urllib.parse import urlencode, urlparse
 
 from bs4 import BeautifulSoup
@@ -29,7 +31,411 @@ MAX_RETRIES = 3
 REQUEST_TIMEOUT = 20
 DETAIL_WORKERS = 2
 
+COUNTRY_ALIASES: Dict[str, str] = {
+    "brasil": "Brazil",
+    "brazil": "Brazil",
+    "bresil": "Brazil",
+    "brasile": "Brazil",
+    "brasilien": "Brazil",
+    "бразилия": "Brazil",
+    "巴西": "Brazil",
+    "portugal": "Portugal",
+    "portogallo": "Portugal",
+    "португалия": "Portugal",
+    "葡萄牙": "Portugal",
+    "united states": "United States",
+    "estados unidos": "United States",
+    "etats-unis": "United States",
+    "etats unis": "United States",
+    "stati uniti": "United States",
+    "vereinigte staaten": "United States",
+    "eua": "United States",
+    "usa": "United States",
+    "us": "United States",
+    "сша": "United States",
+    "美国": "United States",
+    "canada": "Canada",
+    "kanada": "Canada",
+    "канада": "Canada",
+    "加拿大": "Canada",
+    "united kingdom": "United Kingdom",
+    "reino unido": "United Kingdom",
+    "royaume-uni": "United Kingdom",
+    "royaume uni": "United Kingdom",
+    "regno unito": "United Kingdom",
+    "vereinigtes konigreich": "United Kingdom",
+    "grossbritannien": "United Kingdom",
+    "uk": "United Kingdom",
+    "великобритания": "United Kingdom",
+    "英国": "United Kingdom",
+    "germany": "Germany",
+    "alemanha": "Germany",
+    "alemania": "Germany",
+    "allemagne": "Germany",
+    "germania": "Germany",
+    "deutschland": "Germany",
+    "германия": "Germany",
+    "德国": "Germany",
+    "spain": "Spain",
+    "espanha": "Spain",
+    "espana": "Spain",
+    "espagne": "Spain",
+    "spagna": "Spain",
+    "spanien": "Spain",
+    "испания": "Spain",
+    "西班牙": "Spain",
+    "ireland": "Ireland",
+    "irlanda": "Ireland",
+    "irlande": "Ireland",
+    "irland": "Ireland",
+    "ирландия": "Ireland",
+    "爱尔兰": "Ireland",
+}
+
+COUNTRY_GEO_IDS: Dict[str, str] = {
+    "Brazil": "106057199",
+    "Portugal": "100364837",
+    "United States": "103644278",
+    "Canada": "101174742",
+    "United Kingdom": "101165590",
+    "Germany": "101282230",
+    "Spain": "105646813",
+    "Ireland": "104738515",
+}
+
+COUNTRY_TOKENS: Dict[str, Tuple[str, ...]] = {
+    "Brazil": ("brazil", "brasil", "brasile", "brasilien", "bresil", "бразилия", "巴西"),
+    "Portugal": ("portugal", "portogallo", "португалия", "葡萄牙"),
+    "United States": (
+        "united states",
+        "estados unidos",
+        "etats-unis",
+        "etats unis",
+        "stati uniti",
+        "vereinigte staaten",
+        "usa",
+        "сша",
+        "美国",
+    ),
+    "Canada": ("canada", "kanada", "канада", "加拿大"),
+    "United Kingdom": (
+        "united kingdom",
+        "reino unido",
+        "royaume-uni",
+        "royaume uni",
+        "regno unito",
+        "vereinigtes konigreich",
+        "grossbritannien",
+        "великобритания",
+        "英国",
+    ),
+    "Germany": ("germany", "alemanha", "alemania", "allemagne", "germania", "deutschland", "германия", "德国"),
+    "Spain": ("spain", "espanha", "espana", "espagne", "spagna", "spanien", "испания", "西班牙"),
+    "Ireland": ("ireland", "irlanda", "irlande", "irland", "ирландия", "爱尔兰"),
+}
+
+COUNTRY_SUFFIX_CODES: Dict[str, Tuple[str, ...]] = {
+    "United States": ("us",),
+    "United Kingdom": ("uk",),
+}
+
+OTHER_COUNTRY_TOKENS: Tuple[str, ...] = (
+    "argentina",
+    "mexico",
+    "colombia",
+    "chile",
+    "peru",
+    "uruguay",
+    "uruguai",
+    "paraguay",
+    "paraguai",
+    "ecuador",
+    "equador",
+    "venezuela",
+    "bolivia",
+    "costa rica",
+    "panama",
+    "france",
+    "franca",
+    "francia",
+    "frankreich",
+    "italy",
+    "italia",
+    "italie",
+    "italien",
+    "netherlands",
+    "holanda",
+    "paises baixos",
+    "poland",
+    "polonia",
+    "india",
+    "china",
+    "japan",
+    "japao",
+    "australia",
+    "switzerland",
+    "suica",
+    "belgium",
+    "belgica",
+    "austria",
+    "sweden",
+    "suecia",
+    "norway",
+    "noruega",
+    "denmark",
+    "dinamarca",
+    "finland",
+    "finlandia",
+    "russia",
+    "ukraine",
+    "ucrania",
+    "romania",
+    "romenia",
+    "czechia",
+    "czech republic",
+    "singapore",
+    "cingapura",
+    "israel",
+    "latin america",
+    "america latina",
+    "latam",
+    "emea",
+    "apac",
+    "worldwide",
+    "global",
+    "european union",
+    "europe",
+    "europa",
+    "north america",
+    "america do norte",
+)
+
+BRAZIL_UNAMBIGUOUS_UF_RE = re.compile(
+    r",\s*(?:ac|ap|am|ba|ce|df|go|mg|pb|pr|pe|pi|rj|rn|rs|ro|rr|sp|se|to)$"
+)
+BRAZIL_AMBIGUOUS_UF_RE = re.compile(r",\s*(?:al|es|ma|ms|mt|pa|sc)$")
+
+COUNTRY_REGION_TOKENS: Dict[str, Tuple[str, ...]] = {
+    "Brazil": (
+        "acre",
+        "alagoas",
+        "amapa",
+        "amazonas",
+        "bahia",
+        "ceara",
+        "distrito federal",
+        "espirito santo",
+        "goias",
+        "maranhao",
+        "mato grosso",
+        "mato grosso do sul",
+        "minas gerais",
+        "para",
+        "paraiba",
+        "parana",
+        "pernambuco",
+        "piaui",
+        "rio de janeiro",
+        "rio grande do norte",
+        "rio grande do sul",
+        "rondonia",
+        "roraima",
+        "santa catarina",
+        "sao paulo",
+        "san pablo",
+        "sergipe",
+        "tocantins",
+        "rio branco",
+        "maceio",
+        "macapa",
+        "manaus",
+        "salvador",
+        "feira de santana",
+        "vitoria da conquista",
+        "fortaleza",
+        "juazeiro do norte",
+        "brasilia",
+        "vitoria",
+        "vila velha",
+        "serra",
+        "goiania",
+        "anapolis",
+        "aparecida de goiania",
+        "sao luis",
+        "cuiaba",
+        "campo grande",
+        "belo horizonte",
+        "uberlandia",
+        "contagem",
+        "juiz de fora",
+        "betim",
+        "montes claros",
+        "manhuacu",
+        "belem",
+        "joao pessoa",
+        "campina grande",
+        "curitiba",
+        "londrina",
+        "maringa",
+        "cascavel",
+        "recife",
+        "jaboatao dos guararapes",
+        "olinda",
+        "teresina",
+        "niteroi",
+        "duque de caxias",
+        "nova iguacu",
+        "natal",
+        "porto alegre",
+        "caxias do sul",
+        "canoas",
+        "pelotas",
+        "porto velho",
+        "boa vista",
+        "florianopolis",
+        "joinville",
+        "blumenau",
+        "itajai",
+        "campinas",
+        "sao jose dos campos",
+        "ribeirao preto",
+        "sorocaba",
+        "santos",
+        "barueri",
+        "aracaju",
+        "palmas",
+    ),
+    "Portugal": ("lisboa", "lisbon", "porto", "braga", "coimbra", "aveiro", "setubal", "faro", "cascais", "oeiras", "sintra", "matosinhos", "almada", "guimaraes"),
+    "United States": (
+        "california",
+        "new york",
+        "texas",
+        "washington",
+        "florida",
+        "massachusetts",
+        "colorado",
+        "virginia",
+        "north carolina",
+        "arizona",
+        "new jersey",
+        "san francisco",
+        "los angeles",
+        "san jose",
+        "san diego",
+        "brooklyn",
+        "austin",
+        "dallas",
+        "houston",
+        "seattle",
+        "bellevue",
+        "miami",
+        "orlando",
+        "tampa",
+        "boston",
+        "cambridge",
+        "aurora",
+        "pittsburgh",
+        "philadelphia",
+        "chicago",
+        "atlanta",
+        "denver",
+        "phoenix",
+    ),
+    "Canada": ("ontario", "british columbia", "quebec", "alberta", "toronto", "ottawa", "waterloo", "vancouver", "victoria", "montreal", "calgary", "edmonton"),
+    "United Kingdom": ("england", "inglaterra", "scotland", "escocia", "london", "londres", "manchester", "birmingham", "bristol", "edinburgh", "edimburgo", "glasgow"),
+    "Germany": ("berlin", "berlim", "bavaria", "baviera", "hesse", "hamburg", "hamburgo", "munich", "munique", "munchen", "nuremberg", "frankfurt", "stuttgart", "saarland", "north rhine-westphalia"),
+    "Spain": ("madrid", "madri", "catalonia", "catalunha", "cataluna", "valencia", "andalusia", "andaluzia", "barcelona", "seville", "sevilha", "sevilla", "malaga"),
+    "Ireland": ("dublin", "cork", "galway"),
+}
+
 jobs_state = SearchState(total_key="total_jobs", collected_key="collected_jobs")
+
+
+def _normalize_text(text: str) -> str:
+    """Return lowercase text with combining diacritics stripped."""
+    decomposed = unicodedata.normalize("NFD", text)
+    stripped = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    return stripped.lower().strip()
+
+
+def _contains_token(norm_loc: str, raw_lower: str, token: str) -> bool:
+    if any(ord(ch) > 127 for ch in token):
+        return token in raw_lower
+    return bool(re.search(rf"(?<!\w){re.escape(token)}(?!\w)", norm_loc))
+
+
+def normalize_location_for_linkedin(location: str) -> Tuple[str, str, str]:
+    """Normalize country names to canonical English and infer country geoId when only country is given."""
+    if not location or not location.strip():
+        return "", "", ""
+
+    parts = [part.strip() for part in location.split(",") if part.strip()]
+    if not parts:
+        return "", "", ""
+
+    last_norm = _normalize_text(parts[-1])
+    canonical_country = COUNTRY_ALIASES.get(last_norm, "")
+    if not canonical_country:
+        return location.strip(), "", ""
+
+    parts[-1] = canonical_country
+    geo_id = COUNTRY_GEO_IDS.get(canonical_country, "") if len(parts) == 1 else ""
+    return ", ".join(parts), canonical_country, geo_id
+
+
+def job_matches_country(job_location: Optional[str], canonical_country: str) -> bool:
+    """Verify whether a job location belongs to the requested canonical country."""
+    if not canonical_country:
+        return True
+    if not job_location or not job_location.strip():
+        return False
+
+    raw_lower = job_location.lower()
+    norm_loc = _normalize_text(job_location)
+
+    # Reject if another known country or supra-national region is explicitly named.
+    for other_country, tokens in COUNTRY_TOKENS.items():
+        if other_country == canonical_country:
+            continue
+        if any(_contains_token(norm_loc, raw_lower, tok) for tok in tokens):
+            return False
+    for other_country, suffixes in COUNTRY_SUFFIX_CODES.items():
+        if other_country == canonical_country:
+            continue
+        if any(re.search(rf"(?:^|,\s*){re.escape(sfx)}$", norm_loc) for sfx in suffixes):
+            return False
+    if any(_contains_token(norm_loc, raw_lower, tok) for tok in OTHER_COUNTRY_TOKENS):
+        return False
+
+    # Accept if the target country name is explicitly present.
+    target_tokens = COUNTRY_TOKENS.get(canonical_country, ())
+    if any(_contains_token(norm_loc, raw_lower, tok) for tok in target_tokens):
+        return True
+    target_suffixes = COUNTRY_SUFFIX_CODES.get(canonical_country, ())
+    if any(re.search(rf"(?:^|,\s*){re.escape(sfx)}$", norm_loc) for sfx in target_suffixes):
+        return True
+
+    # Reject if an explicit region/city from another supported country matches.
+    for other_country, region_tokens in COUNTRY_REGION_TOKENS.items():
+        if other_country == canonical_country:
+            continue
+        if any(_contains_token(norm_loc, raw_lower, tok) for tok in region_tokens):
+            return False
+
+    if canonical_country == "Brazil":
+        if BRAZIL_UNAMBIGUOUS_UF_RE.search(norm_loc):
+            return True
+        if BRAZIL_AMBIGUOUS_UF_RE.search(norm_loc):
+            has_pt_diacritics = any(ch in raw_lower for ch in "áàâãéêíóôõúç")
+            has_br_region = any(_contains_token(norm_loc, raw_lower, tok) for tok in COUNTRY_REGION_TOKENS["Brazil"])
+            if has_pt_diacritics or has_br_region:
+                return True
+
+    target_regions = COUNTRY_REGION_TOKENS.get(canonical_country, ())
+    if any(_contains_token(norm_loc, raw_lower, tok) for tok in target_regions):
+        return True
+
+    return False
 
 
 def calculate_time_range(max_date: Optional[str]) -> str:
@@ -77,6 +483,7 @@ def build_params(
     experience_level: Optional[List[str]] = None,
     sort_by: str = "",
     easy_apply: bool = False,
+    geo_id: str = "",
 ) -> str:
     """Build properly URL-encoded query string for LinkedIn job search."""
     params: List[tuple[str, str]] = [
@@ -96,9 +503,14 @@ def build_params(
         params.append(("keywords", cleaned))
 
     if location:
-        loc = location.strip()
-        if loc:
-            params.append(("location", loc))
+        norm_loc, _canonical_country, inferred_geo_id = normalize_location_for_linkedin(location)
+        if norm_loc:
+            params.append(("location", norm_loc))
+        effective_geo_id = geo_id or inferred_geo_id
+        if effective_geo_id:
+            params.append(("geoId", effective_geo_id))
+    elif geo_id:
+        params.append(("geoId", geo_id))
 
     if distance:
         params.append(("distance", str(distance)))
@@ -340,6 +752,7 @@ def search_jobs_thread(
     try:
         with requests.Session() as session:
             time_range = calculate_time_range(max_date)
+            _, canonical_country, _ = normalize_location_for_linkedin(location)
 
             jobs_state.log("Obtendo número total de vagas...")
             total_jobs = get_job_count(
@@ -382,9 +795,13 @@ def search_jobs_thread(
                     summaries_out=summaries,
                 )
                 for jid in new_ids:
-                    if jid not in seen_ids:
-                        seen_ids.add(jid)
-                        job_ids.append(jid)
+                    if jid in seen_ids:
+                        continue
+                    seen_ids.add(jid)
+                    summary_loc = summaries.get(jid, {}).get("location")
+                    if canonical_country and summary_loc and not job_matches_country(summary_loc, canonical_country):
+                        continue
+                    job_ids.append(jid)
 
                 progress = (page + 1) / num_pages * 50
                 jobs_state.update_progress(
@@ -433,7 +850,11 @@ def search_jobs_thread(
                             return
 
                         detail = future.result()
-                        if detail and not detail.get("error"):
+                        if (
+                            detail
+                            and not detail.get("error")
+                            and (not canonical_country or job_matches_country(detail.get("location"), canonical_country))
+                        ):
                             jobs.append(detail)
                             jobs_state.set_results(jobs)
 
