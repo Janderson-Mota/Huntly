@@ -216,7 +216,7 @@ body {
   min-width: 0;
 }
 
-.form-group label {
+.form-group > label {
   font-family: var(--font-mono);
   font-size: 0.65rem;
   font-weight: 600;
@@ -987,7 +987,7 @@ body {
     gap: 0.55rem;
   }
 
-  .form-group label {
+  .form-group > label {
     font-size: 0.62rem;
     letter-spacing: 0.02em;
   }
@@ -1075,7 +1075,7 @@ body {
     grid-column: auto;
   }
 
-  .form-group label {
+  .form-group > label {
     white-space: normal;
   }
 

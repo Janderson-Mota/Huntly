@@ -800,8 +800,7 @@ def _match_work_mode_text(text: str) -> Optional[str]:
     if not text:
         return None
     raw_lower = text.lower()
-    cleaned_raw = _NEGATED_WORK_MODE_RE.sub(" ", raw_lower)
-    norm = _normalize_text(cleaned_raw)
+    norm = _NEGATED_WORK_MODE_RE.sub(" ", _normalize_text(raw_lower))
 
     for mode, patterns in (("hybrid", _HYBRID_PATTERNS), ("remote", _REMOTE_PATTERNS), ("onsite", _ONSITE_PATTERNS)):
         if any(pat.search(norm) for pat in patterns):
