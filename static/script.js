@@ -24,6 +24,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const resultsCountText = document.getElementById("results-count-text");
   const navbarResultsCount = document.getElementById("navbar-results-count");
   const quickFilterInput = document.getElementById("quick-filter-input");
+  const excludeFilterInput = document.getElementById("exclude-filter-input");
+  const easyApplyCheckbox = document.getElementById("easy_apply");
   const exportButtons = document.querySelectorAll(".export-btn");
 
   const jobModal = document.getElementById("job-modal");
@@ -426,6 +428,12 @@ document.addEventListener("DOMContentLoaded", () => {
     currentPage = 1;
     renderFilteredResults();
   });
+  if (excludeFilterInput) {
+    excludeFilterInput.addEventListener("input", () => {
+      currentPage = 1;
+      renderFilteredResults();
+    });
+  }
 
   exportButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -488,12 +496,16 @@ document.addEventListener("DOMContentLoaded", () => {
     searchForm.reset();
     initLocationCascade();
     quickFilterInput.value = "";
+    if (excludeFilterInput) excludeFilterInput.value = "";
     showFeedback("");
+    if (searchResults.length > 0) {
+      currentPage = 1;
+      renderFilteredResults();
+    }
   }
 
   function getFormData() {
     const formData = new FormData(searchForm);
-    const jobType = formData.get("job_type");
     const place = formData.get("place");
     const expLevel = formData.get("experience_level");
     return {
@@ -502,12 +514,12 @@ document.addEventListener("DOMContentLoaded", () => {
       keywords: (formData.get("keywords") || "").trim(),
       location: buildLocationString(),
       max_date: formData.get("job_max_date") || "",
-      sort_by: "",
+      sort_by: formData.get("sort_by") || "R",
       distance: "",
-      job_type: jobType ? [jobType] : [],
+      job_type: [],
       place: place ? [place] : [],
       experience_level: expLevel ? expLevel.split(",") : [],
-      easy_apply: false,
+      easy_apply: Boolean(easyApplyCheckbox && easyApplyCheckbox.checked),
       limit_jobs: 100,
     };
   }
@@ -612,23 +624,50 @@ document.addEventListener("DOMContentLoaded", () => {
       btn.disabled = !hasResults;
     });
 
-    const term = quickFilterInput.value.trim().toLowerCase();
-    const filtered = !term
+    const rawQuickTerm = quickFilterInput.value.trim();
+    const quickTerm = normalizeLookup(rawQuickTerm);
+    const rawExclude = excludeFilterInput ? excludeFilterInput.value.trim() : "";
+    const excludeTerms = rawExclude
+      ? rawExclude.split(",").map((part) => normalizeLookup(part)).filter(Boolean)
+      : [];
+
+    const filtered = !quickTerm && excludeTerms.length === 0
       ? searchResults
       : searchResults.filter((item) => {
           const display = getDisplayJob(item);
-          const haystack = [
-            item.title,
-            item.company,
-            item.location,
-            item.description,
-            display.title,
-            display.description,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-          return haystack.includes(term);
+          if (quickTerm) {
+            const includeHaystack = normalizeLookup(
+              [
+                item.title,
+                item.company,
+                item.location,
+                item.description,
+                display.title,
+                display.description,
+              ]
+                .filter(Boolean)
+                .join(" ")
+            );
+            if (!includeHaystack.includes(quickTerm)) {
+              return false;
+            }
+          }
+          if (excludeTerms.length > 0) {
+            const excludeHaystack = normalizeLookup(
+              [
+                item.title,
+                item.description,
+                display.title,
+                display.description,
+              ]
+                .filter(Boolean)
+                .join(" ")
+            );
+            if (excludeTerms.some((term) => excludeHaystack.includes(term))) {
+              return false;
+            }
+          }
+          return true;
         });
 
     updateCounts(filtered.length, searchResults.length);
@@ -639,13 +678,23 @@ document.addEventListener("DOMContentLoaded", () => {
       emptyState.style.display = "flex";
       const h3 = emptyState.querySelector("h3");
       const p = emptyState.querySelector("p");
-      if (hasResults && term) {
+      if (hasResults && (quickTerm || excludeTerms.length > 0)) {
         h3.textContent = t("emptyNoMatchTitle");
-        p.textContent = t("emptyNoMatchDesc", { term: quickFilterInput.value, total: searchResults.length });
+        if (quickTerm && excludeTerms.length > 0) {
+          p.textContent = t("emptyNoMatchCombinedDesc", {
+            term: rawQuickTerm,
+            excluded: rawExclude,
+            total: searchResults.length,
+          });
+        } else if (quickTerm) {
+          p.textContent = t("emptyNoMatchDesc", { term: rawQuickTerm, total: searchResults.length });
+        } else {
+          p.textContent = t("emptyNoMatchExcludeDesc", { excluded: rawExclude, total: searchResults.length });
+        }
       } else if (isSearching) {
         h3.textContent = t("emptyCollectingTitle");
         p.textContent = t("emptyCollectingDesc");
-      } else if (searchResults.length === 0 && !quickFilterInput.value) {
+      } else if (searchResults.length === 0 && !rawQuickTerm && !rawExclude) {
         h3.textContent = t("emptyInitialTitle");
         p.textContent = t("emptyInitialDesc");
       } else {

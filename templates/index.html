@@ -117,14 +117,10 @@
             </div>
 
             <div class="form-group">
-              <label for="job_type" data-i18n="labelJobType">Tipo de contrato</label>
-              <select name="job_type" class="form-control" id="job_type">
-                <option value="" selected data-i18n="typeAll">Todos os tipos</option>
-                <option value="F" data-i18n="typeFull">Tempo Integral</option>
-                <option value="P" data-i18n="typePart">Meio Período</option>
-                <option value="I" data-i18n="typeIntern">Estágio</option>
-                <option value="C" data-i18n="typeContract">Contrato</option>
-                <option value="T" data-i18n="typeTemp">Temporário</option>
+              <label for="sort_by" data-i18n="labelSortBy">Ordenar por</label>
+              <select name="sort_by" class="form-control" id="sort_by">
+                <option value="R" selected data-i18n="sortRelevant">Mais relevantes</option>
+                <option value="DD" data-i18n="sortRecent">Mais recentes</option>
               </select>
             </div>
           </div>
@@ -132,20 +128,28 @@
 
         <!-- Ações Principais -->
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="reset-filters-btn">
-            <i class="bi bi-arrow-counterclockwise"></i>
-            <span data-i18n="btnReset">limpar filtros</span>
-          </button>
+          <label class="easy-apply-toggle" for="easy_apply">
+            <input type="checkbox" id="easy_apply" name="easy_apply" />
+            <i class="bi bi-lightning-charge"></i>
+            <span data-i18n="labelEasyApply">Candidatura Simplificada</span>
+          </label>
 
-          <button type="button" class="btn btn-danger" id="stop-button" style="display: none">
-            <i class="bi bi-stop-circle"></i>
-            <span data-i18n="btnStop">Parar Busca</span>
-          </button>
+          <div class="form-actions-buttons">
+            <button type="button" class="btn btn-outline" id="reset-filters-btn">
+              <i class="bi bi-arrow-counterclockwise"></i>
+              <span data-i18n="btnReset">limpar filtros</span>
+            </button>
 
-          <button type="submit" class="btn btn-primary" id="search-btn">
-            <span id="search-btn-text" data-i18n="btnSearch">Buscar Vagas</span>
-            <i class="bi bi-arrow-right"></i>
-          </button>
+            <button type="button" class="btn btn-danger" id="stop-button" style="display: none">
+              <i class="bi bi-stop-circle"></i>
+              <span data-i18n="btnStop">Parar Busca</span>
+            </button>
+
+            <button type="submit" class="btn btn-primary" id="search-btn">
+              <span id="search-btn-text" data-i18n="btnSearch">Buscar Vagas</span>
+              <i class="bi bi-arrow-right"></i>
+            </button>
+          </div>
         </div>
       </form>
 
@@ -170,11 +174,24 @@
     <!-- Seção de Resultados em Cards abaixo dos filtros -->
     <section id="resultados" class="results-section" aria-label="Resultados da Busca" data-i18n-aria-label="ariaResultsSection">
       <div id="results-toolbar" class="results-toolbar" style="display: none">
-        <div class="quick-filter-box">
-          <i class="bi bi-funnel"></i>
-          <input type="text" id="quick-filter-input" class="form-control form-control-sm"
-            data-i18n-placeholder="quickFilterPlaceholder"
-            placeholder="Filtrar cards por título, empresa ou cidade..." />
+        <div class="results-filters">
+          <div class="quick-filter-box">
+            <i class="bi bi-funnel"></i>
+            <input type="text" id="quick-filter-input" class="form-control form-control-sm"
+              data-i18n-placeholder="quickFilterPlaceholder"
+              data-i18n-aria-label="ariaQuickFilter"
+              placeholder="Filtrar cards por título, empresa ou cidade..."
+              aria-label="Filtrar cards por título, empresa ou cidade" />
+          </div>
+
+          <div class="quick-filter-box exclude-filter-box">
+            <i class="bi bi-slash-circle"></i>
+            <input type="text" id="exclude-filter-input" class="form-control form-control-sm"
+              data-i18n-placeholder="excludeFilterPlaceholder"
+              data-i18n-aria-label="ariaExcludeFilter"
+              placeholder="Excluir termos (ex: Sênior, Estágio)..."
+              aria-label="Excluir vagas com palavras-chave indesejadas" />
+          </div>
         </div>
 
         <div class="export-buttons">

@@ -1029,6 +1029,7 @@ def search_jobs_thread(
                 return
 
             jobs: List[Dict[str, Any]] = []
+            job_order = {jid: idx for idx, jid in enumerate(job_ids)}
             total_to_fetch = len(job_ids)
 
             thread_local = threading.local()
@@ -1068,7 +1069,8 @@ def search_jobs_thread(
                             and (not canonical_country or job_matches_country(detail.get("location"), canonical_country))
                         ):
                             jobs.append(detail)
-                            jobs_state.set_results(jobs, run_id=run_id)
+                            jobs.sort(key=lambda item: job_order.get(str(item.get("id")), len(job_order)))
+                            jobs_state.set_results(list(jobs), run_id=run_id)
 
                         progress = 50 + (completed / total_to_fetch) * 50
                         jobs_state.update_progress(

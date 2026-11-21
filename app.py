@@ -73,6 +73,22 @@ def _parse_str_list(raw_value: Any) -> List[str]:
     return [str(item).strip() for item in raw_value if item is not None and str(item).strip()]
 
 
+def _parse_bool(raw_value: Any, default: bool = False) -> bool:
+    if raw_value is None or raw_value == "":
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, (int, float)):
+        return bool(raw_value)
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            return True
+        if normalized in ("0", "false", "no", "off"):
+            return False
+    return bool(raw_value)
+
+
 def _validate_search_type(search_type: Any):
     if search_type != "jobs":
         return jsonify({"error": "Tipo de busca inválido.", "error_code": "errInvalidSearchType"}), 400
@@ -104,11 +120,11 @@ def start_search():
         location = _parse_str(params.get("location"), max_len=200)
         max_date = _parse_str(params.get("max_date"), max_len=30)
         distance = _parse_str(params.get("distance"), max_len=10)
-        sort_by = _parse_str(params.get("sort_by"), max_len=10)
+        sort_by = _parse_str(params.get("sort_by"), max_len=10).upper()
         job_type = _parse_str_list(params.get("job_type"))
         place = _parse_str_list(params.get("place"))
         experience_level = _parse_str_list(params.get("experience_level"))
-        easy_apply = bool(params.get("easy_apply", False))
+        easy_apply = _parse_bool(params.get("easy_apply"), default=False)
         limit_jobs = _parse_limit(params.get("limit_jobs"), default=100)
         lang = _parse_str(params.get("lang"), max_len=10).lower() or "en"
 
