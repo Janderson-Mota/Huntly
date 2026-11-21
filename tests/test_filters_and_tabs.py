@@ -8,6 +8,8 @@ import pytest
 from app import DEFAULT_LIMIT_JOBS, MAX_LIMIT_JOBS, MIN_LIMIT_JOBS, UNLIMITED_JOBS_CAP, app
 from scraper import (
     UNLIMITED_JOBS_CAP as SCRAPER_UNLIMITED_CAP,
+    _infer_search_locale,
+    adapt_keywords_for_location,
     build_experience_search_queries,
     build_params,
     classify_job_match,
@@ -975,6 +977,101 @@ def test_translate_single_batch_sqlite_persistent_cache_and_pivot_real_offline(t
     finally:
         translator.clear_cache()
         translator.configure_cache_db(None)
+
+
+def test_country_language_adaptation_of_keywords_and_experience_terms():
+    import translator
+
+    # Country -> language inference across selectors and major markets
+    expected_locales = {
+        "Brazil": "pt",
+        "Portugal": "pt",
+        "United States": "en",
+        "United Kingdom": "en",
+        "Canada": "en",
+        "Australia": "en",
+        "Ireland": "en",
+        "Spain": "es",
+        "Mexico": "es",
+        "Argentina": "es",
+        "Colombia": "es",
+        "Chile": "es",
+        "Germany": "de",
+        "France": "fr",
+        "Italy": "it",
+        "Japan": "ja",
+        "China": "zh",
+        "Russia": "ru",
+    }
+    for country, exp_loc in expected_locales.items():
+        assert _infer_search_locale(country, "pt") == exp_loc
+
+    # Portuguese query in US translates via offline Argos into English with original fallback in Pass 2
+    translator.clear_cache()
+    adapted, locale, orig = adapt_keywords_for_location("Desenvolvedor Backend", "United States", lang="pt")
+    assert locale == "en"
+    assert orig == "Desenvolvedor Backend"
+    assert "developer" in adapted.lower()
+
+    us_queries = build_experience_search_queries("Desenvolvedor Backend", ["1"], location="United States", lang="pt")
+    assert us_queries[0][2] is True
+    assert "developer" in us_queries[0][0].lower() and "internship" in us_queries[0][0].lower()
+    assert any(q[0] == "Desenvolvedor Backend" for q in us_queries)
+
+    # Same experience filter adapts cleanly to Germany, Spain, France, Italy, Japan, China
+    de_queries = build_experience_search_queries("PHP", ["1"], location="Germany", lang="pt")
+    assert de_queries[0] == ("PHP Praktikum", ["1"], True)
+    assert ("PHP Internship", ["1"], False) in de_queries
+
+    es_queries = build_experience_search_queries("PHP", ["1"], location="Mexico", lang="pt")
+    assert es_queries[0] == ("PHP Prácticas", ["1"], True)
+
+    fr_queries = build_experience_search_queries("PHP", ["1"], location="France", lang="pt")
+    assert fr_queries[0] == ("PHP Stage", ["1"], True)
+
+    it_queries = build_experience_search_queries("PHP", ["1"], location="Italy", lang="pt")
+    assert it_queries[0] == ("PHP Stage", ["1"], True)
+    assert ("PHP Tirocinio", ["1"], False) in it_queries
+
+    ja_queries = build_experience_search_queries("PHP", ["1"], location="Japan", lang="pt")
+    assert ja_queries[0] == ("PHP インターン", ["1"], True)
+
+    zh_queries = build_experience_search_queries("PHP", ["1"], location="China", lang="pt")
+    assert zh_queries[0] == ("PHP 实习", ["1"], True)
+
+    # Pure tech term + universal Tech Lead phrase stay intact regardless of country
+    adapted_php, _, _ = adapt_keywords_for_location("PHP", "United States", lang="pt")
+    assert adapted_php == "PHP"
+    adapted_lead, _, _ = adapt_keywords_for_location("Tech Lead Python", "Brazil", lang="pt")
+    assert adapted_lead == "Tech Lead Python"
+
+    # Safe fallback if offline translation raises
+    with patch("translator.translate_text_with_meta", side_effect=RuntimeError("model load error")):
+        fb_kw, fb_loc, fb_orig = adapt_keywords_for_location("Desenvolvedor Backend", "United States", lang="pt")
+        assert fb_kw == "Desenvolvedor Backend"
+        assert fb_loc == "en"
+        assert fb_orig == "Desenvolvedor Backend"
+
+
+def test_multilingual_experience_classification_for_tab1():
+    multilingual_cases = [
+        ({"title": "PHP Praktikum (m/w/d)", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Werkstudent Backend PHP", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Prácticas Desarrollo Backend", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Stage Développeur PHP", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Offre Stage Développeur Backend", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Tirocinio Sviluppatore PHP", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Backend Internship", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Estágio em PHP", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "バックエンド インターン", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "后端开发实习", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Lead Technique Backend", "experience_level_code": "not_applicable"}, ["tech_lead"], "matched"),
+        ({"title": "テックリード PHP", "experience_level_code": "not_applicable"}, ["tech_lead"], "matched"),
+        ({"title": "Développeur PHP Confirmé", "experience_level_code": "not_applicable"}, ["3,4"], "matched"),
+    ]
+    for job, exp_filter, expected in multilingual_cases:
+        assert classify_job_match(job, experience_level=exp_filter) == expected, f"Failed for {job}"
+
 
 
 

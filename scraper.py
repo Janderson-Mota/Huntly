@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 import requests
 
 from state import SearchState
+import translator
 
 INIT_URL = "https://www.linkedin.com/jobs/search"
 PAGE_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
@@ -364,6 +365,60 @@ _EXP_SEARCH_TERMS_BY_LOCALE: Dict[str, Dict[str, Tuple[str, ...]]] = {
         "tech_lead": ("Tech Lead", "Technical Lead"),
         "director": ("Director", "Head"),
     },
+    "de": {
+        "internship": ("Praktikum", "Werkstudent", "Internship"),
+        "trainee": ("Trainee",),
+        "entry_level": ("Junior",),
+        "mid": ("Mid Level",),
+        "senior": ("Senior",),
+        "tech_lead": ("Tech Lead",),
+        "director": ("Director", "Head"),
+    },
+    "fr": {
+        "internship": ("Stage", "Internship"),
+        "trainee": ("Trainee",),
+        "entry_level": ("Junior",),
+        "mid": ("Confirmé", "Mid Level"),
+        "senior": ("Senior",),
+        "tech_lead": ("Tech Lead", "Lead Technique"),
+        "director": ("Directeur", "Head"),
+    },
+    "it": {
+        "internship": ("Stage", "Tirocinio", "Internship"),
+        "trainee": ("Trainee",),
+        "entry_level": ("Junior",),
+        "mid": ("Mid Level",),
+        "senior": ("Senior",),
+        "tech_lead": ("Tech Lead",),
+        "director": ("Direttore", "Head"),
+    },
+    "ja": {
+        "internship": ("インターン", "Internship"),
+        "trainee": ("Trainee",),
+        "entry_level": ("ジュニア", "Junior"),
+        "mid": ("Mid Level",),
+        "senior": ("シニア", "Senior"),
+        "tech_lead": ("テックリード", "Tech Lead"),
+        "director": ("ディレクター", "Director"),
+    },
+    "zh": {
+        "internship": ("实习", "Internship"),
+        "trainee": ("管培生", "Trainee"),
+        "entry_level": ("初级", "Junior"),
+        "mid": ("中级", "Mid Level"),
+        "senior": ("高级", "Senior"),
+        "tech_lead": ("技术负责人", "Tech Lead"),
+        "director": ("总监", "Director"),
+    },
+    "ru": {
+        "internship": ("Стажировка", "Internship"),
+        "trainee": ("Trainee",),
+        "entry_level": ("Junior",),
+        "mid": ("Middle",),
+        "senior": ("Senior",),
+        "tech_lead": ("Tech Lead",),
+        "director": ("Директор", "Head"),
+    },
 }
 
 _TARGET_DEFAULT_EXP_TOKEN: Dict[str, str] = {
@@ -376,9 +431,90 @@ _TARGET_DEFAULT_EXP_TOKEN: Dict[str, str] = {
     "director": "5,6",
 }
 
-_PT_SEARCH_COUNTRIES = {"Brazil", "Portugal"}
-_ES_SEARCH_COUNTRIES = {"Spain"}
-_ES_EXTRA_LOCATIONS = ("mexico", "argentina", "colombia", "chile", "peru", "uruguay", "ecuador", "espana")
+COUNTRY_LANGUAGE_MAP: Dict[str, str] = {
+    "Brazil": "pt",
+    "Portugal": "pt",
+    "United States": "en",
+    "United Kingdom": "en",
+    "Canada": "en",
+    "Australia": "en",
+    "Ireland": "en",
+    "New Zealand": "en",
+    "Spain": "es",
+    "Mexico": "es",
+    "Argentina": "es",
+    "Colombia": "es",
+    "Chile": "es",
+    "Peru": "es",
+    "Uruguay": "es",
+    "Germany": "de",
+    "Austria": "de",
+    "Switzerland": "de",
+    "France": "fr",
+    "Belgium": "fr",
+    "Italy": "it",
+    "Japan": "ja",
+    "China": "zh",
+    "Russia": "ru",
+}
+
+_EXTRA_LOCATION_COUNTRY_MAP: Dict[str, str] = {
+    "australia": "Australia",
+    "new zealand": "New Zealand",
+    "nova zelandia": "New Zealand",
+    "mexico": "Mexico",
+    "argentina": "Argentina",
+    "colombia": "Colombia",
+    "chile": "Chile",
+    "peru": "Peru",
+    "uruguay": "Uruguay",
+    "uruguai": "Uruguay",
+    "austria": "Austria",
+    "switzerland": "Switzerland",
+    "suica": "Switzerland",
+    "france": "France",
+    "franca": "France",
+    "francia": "France",
+    "frankreich": "France",
+    "france metropolitaine": "France",
+    "paris": "France",
+    "lyon": "France",
+    "belgium": "Belgium",
+    "belgica": "Belgium",
+    "belgique": "Belgium",
+    "italy": "Italy",
+    "italia": "Italy",
+    "italie": "Italy",
+    "italien": "Italy",
+    "milan": "Italy",
+    "milao": "Italy",
+    "rome": "Italy",
+    "roma": "Italy",
+    "japan": "Japan",
+    "japao": "Japan",
+    "japon": "Japan",
+    "tokyo": "Japan",
+    "toquio": "Japan",
+    "日本": "Japan",
+    "china": "China",
+    "chine": "China",
+    "cina": "China",
+    "shanghai": "China",
+    "beijing": "China",
+    "中国": "China",
+    "russia": "Russia",
+    "rossiya": "Russia",
+    "russie": "Russia",
+    "russland": "Russia",
+    "moscow": "Russia",
+    "moscou": "Russia",
+    "россия": "Russia",
+}
+
+_UNIVERSAL_TECH_PHRASES_RE = re.compile(
+    r"\b(?:tech[\s-]?lead|scrum\s+master|product\s+owner|devops|site\s+reliability|sre|qa|ui/ux)\b",
+    re.IGNORECASE,
+)
 
 _NEGATED_WORK_MODE_RE = re.compile(
     r"\b(?:nao\s+e|nao\s+sera|not|no\s+es|non\s+e|pas)\s+(?:100%\s+)?(?:remot[oae]|h[ií]brid[oa]|hybrid|presencial|on[\s-]?site|remote)\b",
@@ -400,8 +536,8 @@ _TITLE_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
     (
         "internship",
         (
-            re.compile(r"\bestagi(?:o|ari[oa])\b|\bintern(?:ship)?\b|\bpracticas\b|\bbecari[oa]\b|\btirocinio\b|\bpraktikum\b|\bpraktikant(?:in)?\b", re.IGNORECASE),
-            re.compile(r"\bstagiaire\b|\bstage\s+(?:de|en|em|it|ti|dev|data|tech|software)\b|^\s*stage\b|\(\s*stage\s*\)", re.IGNORECASE),
+            re.compile(r"\bestagi(?:o|ari[oa])\b|\bintern(?:ship)?\b|\bpracticas\b|\bbecari[oa]\b|\btirocinio\b|\bpraktikum\b|\bpraktikant(?:in)?\b|\bwerkstudent(?:in)?\b", re.IGNORECASE),
+            re.compile(r"\bstagiaire\b|\bstage\s+(?:de|en|em|it|ti|dev|data|tech|software|developp\w*|ingenieur|informatique|backend|frontend|web|mobile)\b|^\s*stage\b|\(\s*stage\s*\)", re.IGNORECASE),
         ),
     ),
     (
@@ -419,7 +555,7 @@ _TITLE_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
     (
         "mid",
         (
-            re.compile(r"\bpleno\b|\bmid[\s-]?level\b|\bsemi[\s-]?senior\b|\bssr\.?(?!\w)|\bmiddle\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+ii\b|\bnivel\s+ii\b|\blevel\s+2\b", re.IGNORECASE),
+            re.compile(r"\bpleno\b|\bconfirme(?:e)?\b|\bmid[\s-]?level\b|\bsemi[\s-]?senior\b|\bssr\.?(?!\w)|\bmiddle\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+ii\b|\bnivel\s+ii\b|\blevel\s+2\b", re.IGNORECASE),
         ),
     ),
     (
@@ -433,7 +569,7 @@ _TITLE_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
         (
             re.compile(
                 r"\btech[\s-]?lead(?:er)?\b|\btechlead\b|\btechnical\s+lead(?:er)?\b|\bteam\s+lead(?:er)?\b"
-                r"|\blider\s+(?:tecnic[oa]|de\s+tecnologia)\b|\blideranca\s+tecnica\b|\bengineering\s+lead\b"
+                r"|\blider\s+(?:tecnic[oa]|de\s+tecnologia)\b|\blideranca\s+tecnica\b|\blead\s+technique\b|\bengineering\s+lead\b"
                 r"|\bdev\s+lead\b|\blead\s+(?:dev|engineer|developer|architect|analyst|designer|scientist|qa|sre|devops)\b"
                 r"|\b(?:software|backend|back-end|frontend|front-end|full[\s-]?stack|mobile|data|qa|devops|cloud|platform|security|php|python|java|node|react|angular|vue|go|golang|rust|ruby|dotnet|ios|android|flutter)\s+lead\b"
                 r"|(?<!\w)\.net\s+lead\b",
@@ -527,13 +663,13 @@ _DESC_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
 )
 
 _TITLE_EXP_NON_LATIN: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("internship", ("стажировк", "стажер", "стажёр", "实习")),
+    ("internship", ("стажировк", "стажер", "стажёр", "实习", "インターン")),
     ("trainee", ("стажер-программа", "管培生")),
-    ("entry_level", ("начальн", "младш", "初级")),
+    ("entry_level", ("начальн", "младш", "初级", "ジュニア")),
     ("mid", ("средн", "中级")),
-    ("senior", ("старш", "архитектор", "ведущ", "高级", "资深", "架构师", "专家")),
-    ("tech_lead", ("тимлид", "техлид", "技术负责人")),
-    ("director", ("директор", "руководител", "总监", "高管")),
+    ("senior", ("старш", "архитектор", "ведущ", "高级", "资深", "架构师", "专家", "シニア")),
+    ("tech_lead", ("тимлид", "техлид", "技术负责人", "テックリード")),
+    ("director", ("директор", "руководител", "总监", "高管", "ディレクター")),
 )
 
 _WORK_MODE_NON_LATIN: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
@@ -1228,38 +1364,78 @@ def _expand_experience_linkedin_codes(values: Optional[Union[str, List[str]]]) -
     return codes
 
 
-def _infer_search_locale(location: str = "", lang: str = "en") -> str:
-    """Infer preferred search term locale ('pt', 'es', 'en') from location and UI language."""
-    norm_lang = (lang or "en").strip().lower().split("-")[0]
-    fallback_locale = norm_lang if norm_lang in ("pt", "es", "en") else "en"
+def _resolve_location_country_for_language(location: str = "") -> str:
+    """Resolve country name from location string for search-language adaptation."""
+    if not location or not location.strip():
+        return ""
+    _norm_loc, canonical_country, _ = normalize_location_for_linkedin(location)
+    if canonical_country in COUNTRY_LANGUAGE_MAP:
+        return canonical_country
 
-    if location and location.strip():
-        _norm_loc, canonical_country, _ = normalize_location_for_linkedin(location)
-        if canonical_country in _PT_SEARCH_COUNTRIES:
-            return "pt"
-        if canonical_country in _ES_SEARCH_COUNTRIES:
-            return "es"
-        if canonical_country:
-            return "en"
+    raw_lower = location.lower()
+    norm_loc = _normalize_text(location)
+    parts = [p.strip() for p in location.split(",") if p.strip()]
+    for part in reversed(parts):
+        part_norm = _normalize_text(part)
+        if part_norm in _EXTRA_LOCATION_COUNTRY_MAP:
+            return _EXTRA_LOCATION_COUNTRY_MAP[part_norm]
+        raw_part = part.lower().strip()
+        if raw_part in _EXTRA_LOCATION_COUNTRY_MAP:
+            return _EXTRA_LOCATION_COUNTRY_MAP[raw_part]
 
-        raw_lower = location.lower()
-        norm_loc = _normalize_text(location)
-        for country_name, locale in (
-            ("Brazil", "pt"),
-            ("Portugal", "pt"),
-            ("Spain", "es"),
-            ("United States", "en"),
-            ("United Kingdom", "en"),
-            ("Canada", "en"),
-            ("Ireland", "en"),
+    for country_name, region_tokens in COUNTRY_REGION_TOKENS.items():
+        if country_name in COUNTRY_LANGUAGE_MAP and any(
+            _contains_token(norm_loc, raw_lower, tok) for tok in region_tokens
         ):
-            region_tokens = COUNTRY_REGION_TOKENS.get(country_name, ())
-            if any(_contains_token(norm_loc, raw_lower, tok) for tok in region_tokens):
-                return locale
-        if any(_contains_token(norm_loc, raw_lower, tok) for tok in _ES_EXTRA_LOCATIONS):
-            return "es"
+            return country_name
 
-    return fallback_locale
+    for tok, country_name in _EXTRA_LOCATION_COUNTRY_MAP.items():
+        if _contains_token(norm_loc, raw_lower, tok):
+            return country_name
+    return ""
+
+
+def _infer_search_locale(location: str = "", lang: str = "en") -> str:
+    """Infer preferred search term locale from country/location and fallback UI language."""
+    country = _resolve_location_country_for_language(location)
+    if country and country in COUNTRY_LANGUAGE_MAP:
+        return COUNTRY_LANGUAGE_MAP[country]
+
+    norm_lang = translator.normalize_target_lang(lang)
+    return norm_lang if (norm_lang and norm_lang in _EXP_SEARCH_TERMS_BY_LOCALE) else "en"
+
+
+def adapt_keywords_for_location(
+    keywords: str, location: str = "", lang: str = "en"
+) -> Tuple[str, str, str]:
+    """Translate user keywords into the selected country's predominant job language when different.
+
+    Returns (adapted_keywords, target_locale, original_keywords).
+    """
+    cleaned = (keywords or "").strip()
+    country = _resolve_location_country_for_language(location)
+    target_locale = COUNTRY_LANGUAGE_MAP[country] if country in COUNTRY_LANGUAGE_MAP else _infer_search_locale(location, lang)
+    if not cleaned or not country:
+        return cleaned, target_locale, cleaned
+
+    # Keep universal IT acronyms/phrases untouched while detecting genuine natural language
+    masked = _UNIVERSAL_TECH_PHRASES_RE.sub(" ", cleaned).strip()
+    if not masked:
+        return cleaned, target_locale, cleaned
+
+    detected_src = translator.detect_source_language(masked, target_locale, strict=True)
+    if not detected_src or detected_src == target_locale:
+        return cleaned, target_locale, cleaned
+
+    try:
+        translated_kw, _ = translator.translate_text_with_meta(
+            cleaned, target_locale, source_lang=detected_src
+        )
+    except Exception:
+        translated_kw = cleaned
+
+    final_kw = (translated_kw or "").strip() or cleaned
+    return final_kw, target_locale, cleaned
 
 
 def _combine_keyword_with_term(keywords: str, term: str) -> str:
@@ -1327,15 +1503,18 @@ def build_experience_search_queries(
     location: str = "",
     lang: str = "en",
 ) -> List[Tuple[str, Optional[List[str]], bool]]:
-    """Build ordered (keywords, experience_tokens, is_primary) queries enriched with level terms."""
-    cleaned_kw = (keywords or "").strip()
+    """Build ordered (keywords, experience_tokens, is_primary) queries adapted to country language & levels."""
+    adapted_kw, locale, original_kw = adapt_keywords_for_location(keywords, location=location, lang=lang)
+    has_adapted_alt = bool(adapted_kw and original_kw and _normalize_text(adapted_kw) != _normalize_text(original_kw))
+
     ordered_targets, original_tokens = _extract_ordered_experience_targets(experience_level)
     if not ordered_targets:
-        return [(cleaned_kw, None, True)]
+        if has_adapted_alt:
+            return [(adapted_kw, None, True), (original_kw, None, False)]
+        return [(adapted_kw, None, True)]
 
-    locale = _infer_search_locale(location=location, lang=lang)
     terms_by_target = _EXP_SEARCH_TERMS_BY_LOCALE.get(locale, _EXP_SEARCH_TERMS_BY_LOCALE["en"])
-    existing_kw_targets = detect_title_experience_levels(cleaned_kw)
+    existing_kw_targets = detect_title_experience_levels(adapted_kw)
 
     primary_queries: List[Tuple[str, Optional[List[str]], bool]] = []
     secondary_queries: List[Tuple[str, Optional[List[str]], bool]] = []
@@ -1343,12 +1522,12 @@ def build_experience_search_queries(
     for target, target_tokens in ordered_targets:
         terms = terms_by_target.get(target, ())
         if not terms or target in existing_kw_targets:
-            primary_queries.append((cleaned_kw, target_tokens, True))
+            primary_queries.append((adapted_kw, target_tokens, True))
         else:
-            primary_kw = _combine_keyword_with_term(cleaned_kw, terms[0])
+            primary_kw = _combine_keyword_with_term(adapted_kw, terms[0])
             primary_queries.append((primary_kw, target_tokens, True))
             for alt_term in terms[1:]:
-                alt_kw = _combine_keyword_with_term(cleaned_kw, alt_term)
+                alt_kw = _combine_keyword_with_term(adapted_kw, alt_term)
                 secondary_queries.append((alt_kw, target_tokens, False))
 
         # LinkedIn frequently tags Tech Lead and Trainee roles as "Not applicable";
@@ -1356,12 +1535,14 @@ def build_experience_search_queries(
         if target in _TITLE_REQUIRED_TARGETS:
             lead_term_list = terms if (terms and target not in existing_kw_targets) else ()
             if lead_term_list:
-                secondary_queries.append((_combine_keyword_with_term(cleaned_kw, lead_term_list[0]), None, False))
-            elif cleaned_kw:
-                secondary_queries.append((cleaned_kw, None, False))
+                secondary_queries.append((_combine_keyword_with_term(adapted_kw, lead_term_list[0]), None, False))
+            elif adapted_kw:
+                secondary_queries.append((adapted_kw, None, False))
 
     if original_tokens:
-        secondary_queries.append((cleaned_kw, original_tokens, False))
+        secondary_queries.append((adapted_kw, original_tokens, False))
+        if has_adapted_alt:
+            secondary_queries.append((original_kw, original_tokens, False))
 
     deduped: List[Tuple[str, Optional[List[str]], bool]] = []
     seen_keys: set[Tuple[str, Tuple[str, ...]]] = set()
