@@ -11,8 +11,9 @@ from flask import Flask, Response, jsonify, render_template, request
 from scraper import jobs_state, search_jobs_thread
 
 app = Flask(__name__)
-app.config["TEMPLATES_AUTO_RELOAD"] = True
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+_debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+app.config["TEMPLATES_AUTO_RELOAD"] = _debug_mode
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0 if _debug_mode else 3600
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
@@ -94,6 +95,7 @@ def start_search():
         if not jobs_state.start():
             return jsonify({"error": "Uma busca de vagas já está em andamento."}), 400
 
+        run_id = jobs_state.run_id
         args = (
             keywords,
             location,
@@ -109,10 +111,15 @@ def start_search():
         )
 
         try:
-            search_thread = threading.Thread(target=search_jobs_thread, args=args, daemon=True)
+            search_thread = threading.Thread(
+                target=search_jobs_thread,
+                args=args,
+                kwargs={"run_id": run_id},
+                daemon=True,
+            )
             search_thread.start()
         except Exception:
-            jobs_state.stop()
+            jobs_state.stop(run_id=run_id)
             raise
 
         return jsonify({"message": "Busca de vagas iniciada."}), 200
@@ -144,7 +151,8 @@ def get_search_status():
     err = _validate_search_type(request.args.get("type", "jobs"))
     if err:
         return err
-    return jsonify(jobs_state.snapshot())
+    include_results = request.args.get("include_results", "1").lower() not in ("0", "false", "no")
+    return jsonify(jobs_state.snapshot(include_results=include_results))
 
 
 @app.route("/results")
@@ -234,5 +242,4 @@ def export_to_json():
 
 
 if __name__ == "__main__":
-    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    app.run(debug=debug_mode)
+    app.run(debug=_debug_mode)

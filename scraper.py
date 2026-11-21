@@ -586,6 +586,7 @@ def get_job_ids_per_page(
     sort_by: str = "DD",
     easy_apply: bool = False,
     summaries_out: Optional[Dict[str, Dict[str, Any]]] = None,
+    run_id: Optional[int] = None,
 ) -> List[str]:
     uri = PAGE_URL + build_params(
         keywords,
@@ -601,7 +602,7 @@ def get_job_ids_per_page(
     )
 
     for attempt in range(MAX_RETRIES):
-        if not jobs_state.is_searching:
+        if not jobs_state.is_run_active(run_id):
             return []
 
         try:
@@ -614,13 +615,17 @@ def get_job_ids_per_page(
                 wait_time = 2 ** (attempt + 1)
                 jobs_state.log(
                     f"Rate limit/bloqueio (HTTP {res.status_code}) na página {start}. "
-                    f"Aguardando {wait_time}s (tentativa {attempt + 1}/{MAX_RETRIES})..."
+                    f"Aguardando {wait_time}s (tentativa {attempt + 1}/{MAX_RETRIES})...",
+                    run_id=run_id,
                 )
                 sleep(wait_time)
                 continue
 
             if not res.ok:
-                jobs_state.log(f"HTTP {res.status_code} na página {start} (tentativa {attempt + 1}/{MAX_RETRIES})")
+                jobs_state.log(
+                    f"HTTP {res.status_code} na página {start} (tentativa {attempt + 1}/{MAX_RETRIES})",
+                    run_id=run_id,
+                )
                 sleep(2)
                 continue
 
@@ -630,10 +635,13 @@ def get_job_ids_per_page(
             return ids
 
         except requests.RequestException as exc:
-            jobs_state.log(f"Erro de rede na página {start} (tentativa {attempt + 1}/{MAX_RETRIES}): {exc}")
+            jobs_state.log(
+                f"Erro de rede na página {start} (tentativa {attempt + 1}/{MAX_RETRIES}): {exc}",
+                run_id=run_id,
+            )
             sleep(1.5)
 
-    jobs_state.log(f"Desistindo da página {start} após {MAX_RETRIES} tentativas.")
+    jobs_state.log(f"Desistindo da página {start} após {MAX_RETRIES} tentativas.", run_id=run_id)
     return []
 
 
@@ -698,8 +706,9 @@ def get_job_detail(
     session: requests.Session,
     job_id: str,
     fallback: Optional[Dict[str, Any]] = None,
+    run_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    if not jobs_state.is_searching:
+    if not jobs_state.is_run_active(run_id):
         return {}
 
     uri = POST_URL + job_id
@@ -740,7 +749,7 @@ def get_job_detail(
             if attempt == 0:
                 sleep(1.5)
                 continue
-            jobs_state.log(f"Falha na vaga {job_id}: {exc}")
+            jobs_state.log(f"Falha na vaga {job_id}: {exc}", run_id=run_id)
             if fallback and fallback.get("title"):
                 return fallback
             return {"id": job_id, "error": str(exc)}
@@ -759,16 +768,21 @@ def search_jobs_thread(
     sort_by: str = "",
     easy_apply: bool = False,
     already_started: bool = False,
+    run_id: Optional[int] = None,
 ) -> None:
-    if not already_started and not jobs_state.start():
-        return
+    if not already_started:
+        if not jobs_state.start():
+            return
+        run_id = jobs_state.run_id
+    elif run_id is None:
+        run_id = jobs_state.run_id
 
     try:
         with requests.Session() as session:
             time_range = calculate_time_range(max_date)
             _, canonical_country, _ = normalize_location_for_linkedin(location)
 
-            jobs_state.log("Obtendo número total de vagas...")
+            jobs_state.log("Obtendo número total de vagas...", run_id=run_id)
             total_jobs = get_job_count(
                 session,
                 keywords,
@@ -783,16 +797,16 @@ def search_jobs_thread(
                 easy_apply=easy_apply,
             )
             num_pages = max(1, math.ceil(total_jobs / PAGE_SIZE)) + (3 if canonical_country else 0)
-            jobs_state.set_total(total_jobs)
-            jobs_state.log(f"Buscando até ~{total_jobs} vagas ({num_pages} páginas)")
+            jobs_state.set_total(total_jobs, run_id=run_id)
+            jobs_state.log(f"Buscando até ~{total_jobs} vagas ({num_pages} páginas)", run_id=run_id)
 
             job_ids: List[str] = []
             seen_ids: set[str] = set()
             summaries: Dict[str, Dict[str, Any]] = {}
             start_offset = 0
             for page in range(num_pages):
-                if not jobs_state.is_searching:
-                    jobs_state.stop()
+                if not jobs_state.is_run_active(run_id):
+                    jobs_state.stop(run_id=run_id)
                     return
 
                 new_ids = get_job_ids_per_page(
@@ -808,6 +822,7 @@ def search_jobs_thread(
                     sort_by=sort_by,
                     easy_apply=easy_apply,
                     summaries_out=summaries,
+                    run_id=run_id,
                 )
                 for jid in new_ids:
                     if jid in seen_ids:
@@ -820,22 +835,22 @@ def search_jobs_thread(
 
                 progress = (page + 1) / num_pages * 50
                 jobs_state.update_progress(
-                    progress, f"Coletando páginas: {page + 1}/{num_pages} ({len(job_ids)} IDs)"
+                    progress, f"Coletando páginas: {page + 1}/{num_pages} ({len(job_ids)} IDs)", run_id=run_id
                 )
                 if not new_ids or (limit_jobs > 0 and len(job_ids) >= limit_jobs):
                     break
                 start_offset += max(len(new_ids), PAGE_SIZE)
                 sleep(0.2)
 
-            if not jobs_state.is_searching:
-                jobs_state.stop()
+            if not jobs_state.is_run_active(run_id):
+                jobs_state.stop(run_id=run_id)
                 return
 
             if limit_jobs > 0:
                 job_ids = job_ids[:limit_jobs]
 
             if not job_ids:
-                jobs_state.finish("Nenhuma vaga encontrada para os filtros informados.")
+                jobs_state.finish("Nenhuma vaga encontrada para os filtros informados.", run_id=run_id)
                 return
 
             jobs: List[Dict[str, Any]] = []
@@ -851,7 +866,7 @@ def search_jobs_thread(
                     thread_local.session = s
                     with sessions_lock:
                         worker_sessions.append(s)
-                return get_job_detail(thread_local.session, jid, summaries.get(jid))
+                return get_job_detail(thread_local.session, jid, summaries.get(jid), run_id=run_id)
 
             try:
                 with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as executor:
@@ -860,9 +875,9 @@ def search_jobs_thread(
                         for jid in job_ids
                     }
                     for completed, future in enumerate(as_completed(future_map), start=1):
-                        if not jobs_state.is_searching:
+                        if not jobs_state.is_run_active(run_id):
                             executor.shutdown(wait=False, cancel_futures=True)
-                            jobs_state.stop()
+                            jobs_state.stop(run_id=run_id)
                             return
 
                         detail = future.result()
@@ -872,17 +887,17 @@ def search_jobs_thread(
                             and (not canonical_country or job_matches_country(detail.get("location"), canonical_country))
                         ):
                             jobs.append(detail)
-                            jobs_state.set_results(jobs)
+                            jobs_state.set_results(jobs, run_id=run_id)
 
                         progress = 50 + (completed / total_to_fetch) * 50
                         jobs_state.update_progress(
-                            progress, f"Obtendo detalhes: {completed}/{total_to_fetch} ({len(jobs)} vagas)"
+                            progress, f"Obtendo detalhes: {completed}/{total_to_fetch} ({len(jobs)} vagas)", run_id=run_id
                         )
             finally:
                 for ws in worker_sessions:
                     ws.close()
 
-            jobs_state.finish(f"Concluído: {len(jobs)} vagas encontradas")
+            jobs_state.finish(f"Concluído: {len(jobs)} vagas encontradas", run_id=run_id)
 
     except Exception as exc:
-        jobs_state.fail(f"Erro na busca de vagas: {exc}")
+        jobs_state.fail(f"Erro na busca de vagas: {exc}", run_id=run_id)

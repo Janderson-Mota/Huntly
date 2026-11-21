@@ -173,6 +173,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let searchResults = [];
   let currentPage = 1;
   let pollTimeout = null;
+  let lastCollectedCount = -1;
 
   function readStorage(key, fallback) {
     try {
@@ -403,12 +404,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function pollResults() {
     try {
-      const response = await fetch("/status?type=jobs");
+      const response = await fetch("/status?type=jobs&include_results=0");
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || t("errGeneric"));
 
       updateStatusBar(data);
-      await fetchResults();
+      const collectedCount = data.collected_jobs || 0;
+      const isTerminal =
+        data.status === "complete" ||
+        data.progress === 100 ||
+        data.status === "stopped" ||
+        !data.is_searching;
+
+      if (collectedCount !== lastCollectedCount || isTerminal) {
+        lastCollectedCount = collectedCount;
+        await fetchResults();
+      }
 
       if (data.status === "complete" || data.progress === 100) {
         setIdleState();
@@ -575,7 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function getSafeUrl(url) {
     if (typeof url !== "string") return "#";
     const trimmed = url.trim();
-    return trimmed.startsWith("https://") || trimmed.startsWith("http://") ? trimmed : "#";
+    return trimmed.startsWith("https://") ? trimmed : "#";
   }
 
   function createJobCard(job, index = 0, isSeen = false) {
@@ -707,6 +718,7 @@ document.addEventListener("DOMContentLoaded", () => {
     stopButton.style.display = searching ? "inline-flex" : "none";
     statusSection.style.display = searching ? "flex" : "none";
     if (searching) {
+      lastCollectedCount = -1;
       progressBar.style.width = "0%";
       statusPercent.textContent = "0%";
       searchResults = [];
