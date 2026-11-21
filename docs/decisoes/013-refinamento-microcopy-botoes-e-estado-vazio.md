@@ -11,9 +11,10 @@ Após revisão visual da interface e dos textos nos 8 idiomas, identificamos inc
 
 ### O que foi ajustado
 
-1. **Botões e Microcopy (`templates/index.html`, `static/i18n.js`):**
+1. **Botões e Microcopy (`templates/index.html`, `static/i18n.js`, `static/styles.css`):**
    - Padronizada a capitalização em Sentence case nos botões principais, exportação, detalhes e paginação (ex.: `Limpar filtros`, `Buscar vagas`, `Exportar CSV`, `Exportar JSON`, `Ver detalhes`).
-   - Removido o símbolo de link externo (`↗`) de ações internas (`btnExportCsv`, `btnExportJson`, `btnDetails`), mantendo `↗` exclusivamente nos links externos para o LinkedIn (`btnOpenLinkedin`, `modalOpenLinkedin`).
+   - Removidas todas as setas Unicode e ícones de seta dos botões, paginação e selo de tradução (`↗`, `→`, `←`, `bi-arrow-right`, substituindo `→` em `translatedFromTo` por `/`), bem como o ícone `bi-arrow-counterclockwise` do botão **Limpar filtros**.
+   - Padronizados todos os botões da interface em formato compacto (`btn-sm` em `#reset-filters-btn`, `#search-btn`, `#stop-button`, `#modal-link`, cards, exportação e `.pagination-btn`) e reduzida a altura dos campos, `<select>` e `.multi-select-trigger` para `34px` (`30px` em `.lang-select` e `.theme-toggle-btn`).
 
 2. **Estado Vazio Leve e Compacto (`static/styles.css`, `templates/index.html`, `static/i18n.js`):**
    - Removidos a borda tracejada e o container branco pesado do `.empty-state`, reduzindo o padding vertical para `1.5rem 1rem` e adotando texto direto (`Pronto para buscar` / `Escolha um cargo ou filtro acima para listar vagas.`).
@@ -33,5 +34,5 @@ Após revisão visual da interface e dos textos nos 8 idiomas, identificamos inc
 
 ## Consequências
 
-- **Positivas:** Interface mais legível antes da primeira busca, ações internas e externas semanticamente diferenciadas (`↗` apenas para fora do app) e mensagens naturais nos 8 idiomas.
-- **Negativas / Pontos de atenção:** Testes em `tests/test_filters_and_tabs.py` agora validam explicitamente a ausência de `↗` em ações internas, presença em links externos do LinkedIn e ausência do jargão `ID`/`IDs` em `statusCollectingPages`.
+- **Positivas:** Interface mais compacta e enxuta, sem setas decorativas nem ícone de reinício no botão de limpeza, com botões pequenos (`btn-sm`) e controles `<select>` proporcionais nos 8 idiomas.
+- **Negativas / Pontos de atenção:** Testes em `tests/test_filters_and_tabs.py` validam explicitamente a ausência de `↗`, `→` e `←` nas chaves de botões/paginação/selo nos 8 idiomas, ausência de `bi-arrow-counterclockwise` / `bi-arrow-right` no HTML e presença de `btn-sm` nos botões principais e do modal, além da ausência de `ID`/`IDs` em `statusCollectingPages`.
