@@ -968,9 +968,10 @@ select.form-control {
   border-top: 1px solid var(--border-light);
   padding: 1.2rem 0 1.6rem;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem 1.5rem;
+  align-items: baseline;
+  justify-content: center;
+  text-align: center;
+  gap: 0.45rem 0.65rem;
   flex-wrap: wrap;
 }
 
@@ -980,6 +981,13 @@ select.form-control {
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
+}
+
+.footer-sep {
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-size: 0.8rem;
+  user-select: none;
 }
 
 .footer-meta {
@@ -1060,13 +1068,6 @@ select.form-control {
 
   .quick-filter-box {
     max-width: none;
-  }
-
-  .site-footer-inner {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 0.35rem;
   }
 }
 
@@ -1256,5 +1257,12 @@ select.form-control {
 
   .site-footer-inner {
     padding: 1rem 0 1.4rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .footer-sep {
+    display: none;
   }
 }
