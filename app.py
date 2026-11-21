@@ -324,6 +324,10 @@ def translate_job_cards():
         if lang not in SUPPORTED_LANGS:
             return jsonify({"error": "Idioma não suportado.", "error_code": "errInvalidLanguage"}), 400
 
+        raw_mode = _parse_str(params.get("mode"), max_len=16).lower() or "full"
+        if raw_mode not in ("full", "preview"):
+            raise _ValidationError("Modo de tradução inválido.", "errInvalidPayload")
+
         job_ids = _parse_str_list(params.get("job_ids"))[:20]
         target_items: List[Dict[str, Any]] = []
         if job_ids:
@@ -349,8 +353,8 @@ def translate_job_cards():
                 desc = _parse_str(raw.get("description"), max_len=15000) if raw.get("description") is not None else None
                 target_items.append({"id": jid, "title": title, "description": desc})
 
-        translations = translate_jobs_batch(target_items, lang)
-        return jsonify({"lang": lang, "translations": translations}), 200
+        translations = translate_jobs_batch(target_items, lang, mode=raw_mode)
+        return jsonify({"lang": lang, "mode": raw_mode, "translations": translations}), 200
 
     except _ValidationError as exc:
         return jsonify({"error": str(exc), "error_code": exc.code}), 400

@@ -428,3 +428,137 @@ def test_translate_jobs_to_pt_and_source_meta(client):
         assert batch_same["902"]["source_lang"] == "pt"
         assert batch_same["902"]["was_translated"] is False
 
+
+def test_translate_preview_mode_and_full_mode_contract(client):
+    import translator
+
+    translator.clear_cache()
+    sent_texts = []
+
+    class EchoTranslateResp:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[[f"[PT] {self.text}", self.text]], None, "en"]
+
+    def fake_post(url, params=None, data=None, headers=None, timeout=8):
+        sent_texts.append(data["q"])
+        return EchoTranslateResp(data["q"])
+
+    long_desc = " ".join(["Python backend service architecture experience"] * 25)
+    assert len(long_desc) > translator.PREVIEW_DESC_CHARS
+    short_desc = "Remote backend Python role."
+
+    with patch("translator.requests.post", side_effect=fake_post):
+        preview_batch = translator.translate_jobs_batch(
+            [
+                {"id": "910", "title": "Backend Engineer", "description": long_desc},
+                {"id": "911", "title": "Data Engineer", "description": short_desc},
+            ],
+            "pt",
+            mode="preview",
+        )
+        assert preview_batch["910"]["is_full"] is False
+        assert preview_batch["910"]["description"] is None
+        assert preview_batch["910"]["excerpt"].startswith("[PT] ")
+        assert preview_batch["910"]["was_translated"] is True
+        # Original snippet sent for long description was capped at PREVIEW_DESC_CHARS
+        assert any(txt.startswith("Python backend") and len(txt) <= translator.PREVIEW_DESC_CHARS for txt in sent_texts)
+
+        assert preview_batch["911"]["is_full"] is True
+        assert preview_batch["911"]["description"] == f"[PT] {short_desc}"
+        assert preview_batch["911"]["excerpt"] == f"[PT] {short_desc}"
+
+        full_batch = translator.translate_jobs_batch(
+            [{"id": "910", "title": "Backend Engineer", "description": long_desc}],
+            "pt",
+            mode="full",
+        )
+        assert full_batch["910"]["is_full"] is True
+        assert full_batch["910"]["description"] == f"[PT] {long_desc}"
+
+        jobs_state.set_results([{"id": "910", "title": "Backend Engineer", "description": long_desc}])
+        res_preview = client.post("/translate", json={"lang": "pt", "mode": "preview", "job_ids": ["910"]})
+        assert res_preview.status_code == 200
+        preview_payload = res_preview.get_json()
+        assert preview_payload["mode"] == "preview"
+        assert preview_payload["translations"]["910"]["is_full"] is False
+        assert preview_payload["translations"]["910"]["description"] is None
+
+        bad_mode = client.post("/translate", json={"lang": "pt", "mode": "invalid", "job_ids": ["910"]})
+        assert bad_mode.status_code == 400
+
+
+def test_translate_deduplicates_identical_texts_and_skips_obvious_same_lang():
+    import translator
+
+    translator.clear_cache()
+    calls = []
+
+    class FakeResp:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[[f"[PT] {self.text}", self.text]], None, "en"]
+
+    def fake_post(url, params=None, data=None, headers=None, timeout=8):
+        calls.append(data["q"])
+        return FakeResp(data["q"])
+
+    long_pt_desc = (
+        "Buscamos profissional com experiência em desenvolvimento backend Python, Docker e AWS. "
+        "Atuação com nossa equipe de engenharia, pelos projetos da empresa, com benefícios e trabalho remoto. "
+        "Você também terá contato com sistemas distribuídos."
+    )
+    long_es_desc = (
+        "Buscamos desarrollador backend con experiencia en nuestro equipo de ingeniería para el puesto remoto. "
+        "Los conocimientos en desarrollo de sistemas y los beneficios que ofrecemos también forman parte del trabajo."
+    )
+    bilingual_desc = (
+        "Buscamos nossa equipe com você e também nossos benefícios pela vaga. "
+        "We are looking for a strong backend engineer with Python experience and cloud architecture skills."
+    )
+
+    with patch("translator.requests.post", side_effect=fake_post):
+        # Deduplicates identical title across multiple jobs & skips long clear-PT description
+        batch = translator.translate_jobs_batch(
+            [
+                {"id": "920", "title": "Senior Backend Engineer", "description": long_pt_desc},
+                {"id": "921", "title": "Senior Backend Engineer", "description": long_pt_desc},
+            ],
+            "pt",
+            mode="full",
+        )
+        assert calls == ["Senior Backend Engineer"]
+        assert batch["920"]["title"] == "[PT] Senior Backend Engineer"
+        assert batch["921"]["title"] == "[PT] Senior Backend Engineer"
+        assert batch["920"]["description"] == long_pt_desc
+        assert batch["920"]["source_lang"] == "en" or batch["920"]["source_lang"] == "pt"
+
+        # Verify pure same-lang skips with zero HTTP calls for BOTH title+desc or desc-only
+        calls.clear()
+        out_pt, src_pt = translator.translate_text_with_meta(long_pt_desc, "pt")
+        assert calls == []
+        assert out_pt == long_pt_desc
+        assert src_pt == "pt"
+
+        # Clear Spanish description must NOT be skipped when target_lang="pt"
+        out_es, _src_es = translator.translate_text_with_meta(long_es_desc, "pt")
+        assert len(calls) == 1
+        assert out_es == f"[PT] {long_es_desc}"
+
+        # Bilingual mixed PT+EN description must NOT be skipped when target_lang="pt"
+        calls.clear()
+        out_bi, _src_bi = translator.translate_text_with_meta(bilingual_desc, "pt")
+        assert len(calls) == 1
+        assert out_bi == f"[PT] {bilingual_desc}"
+
+

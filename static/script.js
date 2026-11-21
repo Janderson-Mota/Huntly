@@ -211,19 +211,27 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const ITEMS_PER_PAGE = 9;
-  const SESSION_TRANSLATIONS_KEY = "huntly_translations_cache_v2";
+  const SESSION_TRANSLATIONS_KEY = "huntly_translations_cache_v3";
   const MAX_SESSION_TRANSLATIONS = 200;
   let isSearching = false;
   let searchResults = [];
   let activeTab = "matched";
   let currentPage = 1;
   let pollTimeout = null;
+  let prefetchTimeout = null;
   let lastCollectedCount = -1;
   let activeModalJob = null;
   let lastStatusPayload = null;
   let lastFeedback = null;
   const translationCache = loadSessionTranslations();
   const translationInFlight = new Set();
+
+  function clearPrefetch() {
+    if (prefetchTimeout) {
+      clearTimeout(prefetchTimeout);
+      prefetchTimeout = null;
+    }
+  }
 
   function loadSessionTranslations() {
     const cache = new Map();
@@ -257,37 +265,53 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!job || !job.id) return job;
     const cached = translationCache.get(`${currentLang}:${job.id}`);
     if (!cached) return job;
+    const isFull = Boolean(cached.is_full);
+    const excerptText = isFull
+      ? (cached.description || cached.excerpt || job.description)
+      : (cached.excerpt || job.description);
     return {
       ...job,
       title: cached.title || job.title,
-      description: cached.description || job.description,
+      excerpt: excerptText,
+      description: isFull ? (cached.description || job.description) : job.description,
       source_lang: cached.source_lang || null,
       target_lang: cached.target_lang || currentLang,
       was_translated: Boolean(cached.was_translated),
+      is_full_translated: isFull,
     };
   }
 
-  async function ensureTranslations(jobsToTranslate) {
+  async function ensureTranslations(jobsToTranslate, options = {}) {
     if (!Array.isArray(jobsToTranslate) || !jobsToTranslate.length) {
       return;
     }
+    const mode = options.mode === "preview" ? "preview" : "full";
+    const silent = Boolean(options.silent);
     const targetLang = currentLang;
+
     const pendingJobs = jobsToTranslate.filter((job) => {
       if (!job || !job.id || (!job.title && !job.description)) return false;
       const cacheKey = `${targetLang}:${job.id}`;
-      return !translationCache.has(cacheKey) && !translationInFlight.has(cacheKey);
+      const cached = translationCache.get(cacheKey);
+      const fullInFlight = translationInFlight.has(`${targetLang}:full:${job.id}`);
+      const previewInFlight = translationInFlight.has(`${targetLang}:preview:${job.id}`);
+      if (mode === "preview") {
+        return !cached && !previewInFlight && !fullInFlight;
+      }
+      return !(cached && cached.is_full) && !fullInFlight;
     });
     if (!pendingJobs.length) return;
 
     const batch = pendingJobs.slice(0, 20);
     const jobIds = batch.map((job) => String(job.id));
-    jobIds.forEach((jid) => translationInFlight.add(`${targetLang}:${jid}`));
+    const flightKeys = jobIds.map((jid) => `${targetLang}:${mode}:${jid}`);
+    flightKeys.forEach((key) => translationInFlight.add(key));
 
     try {
       const response = await fetch("/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lang: targetLang, job_ids: jobIds }),
+        body: JSON.stringify({ lang: targetLang, mode, job_ids: jobIds }),
       });
       if (!response.ok) return;
 
@@ -299,16 +323,32 @@ document.addEventListener("DOMContentLoaded", () => {
       Object.entries(translations).forEach(([jid, translated]) => {
         if (translated && typeof translated === "object") {
           const cacheKey = `${targetLang}:${jid}`;
-          if (translationCache.size >= MAX_SESSION_TRANSLATIONS) {
+          const prev = translationCache.get(cacheKey);
+          const incomingIsFull =
+            typeof translated.is_full === "boolean" ? translated.is_full : mode === "full";
+          const mergedIsFull = Boolean(prev?.is_full || incomingIsFull);
+          const mergedDescription = incomingIsFull
+            ? (translated.description || prev?.description || "")
+            : (prev?.description || "");
+          const mergedExcerpt =
+            (incomingIsFull
+              ? (translated.description || translated.excerpt)
+              : (translated.excerpt || translated.description)) ||
+            prev?.excerpt ||
+            mergedDescription;
+
+          if (!prev && translationCache.size >= MAX_SESSION_TRANSLATIONS) {
             const oldestKey = translationCache.keys().next().value;
             if (oldestKey) translationCache.delete(oldestKey);
           }
           translationCache.set(cacheKey, {
-            title: translated.title || "",
-            description: translated.description || "",
-            source_lang: translated.source_lang || null,
+            title: translated.title || prev?.title || "",
+            description: mergedDescription,
+            excerpt: mergedExcerpt,
+            source_lang: translated.source_lang || prev?.source_lang || null,
             target_lang: translated.target_lang || targetLang,
-            was_translated: Boolean(translated.was_translated),
+            was_translated: Boolean(prev?.was_translated || translated.was_translated),
+            is_full: mergedIsFull,
           });
           updated = true;
         }
@@ -317,7 +357,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (updated) {
         saveSessionTranslations();
         if (currentLang === targetLang) {
-          renderFilteredResults();
+          if (!silent) {
+            renderFilteredResults();
+          }
           if (jobModal.style.display !== "none" && activeModalJob && translations[String(activeModalJob.id)]) {
             openJobModal(activeModalJob);
           }
@@ -326,7 +368,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch {
       // Safe fallback: keep original card texts
     } finally {
-      jobIds.forEach((jid) => translationInFlight.delete(`${targetLang}:${jid}`));
+      flightKeys.forEach((key) => translationInFlight.delete(key));
     }
   }
 
@@ -764,6 +806,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderFilteredResults() {
+    clearPrefetch();
     const hasResults = searchResults.length > 0;
     const { matched, recommended } = splitResultsByTab();
     updateTabHeader(matched.length, recommended.length);
@@ -790,6 +833,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 item.location,
                 item.description,
                 display.title,
+                display.excerpt,
                 display.description,
               ]
                 .filter(Boolean)
@@ -805,6 +849,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 item.title,
                 item.description,
                 display.title,
+                display.excerpt,
                 display.description,
               ]
                 .filter(Boolean)
@@ -876,7 +921,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     renderPagination(filtered.length, totalPages);
-    ensureTranslations(pageItems);
+    ensureTranslations(pageItems, { mode: "preview" });
+    clearPrefetch();
+    if (!isSearching && currentPage < totalPages) {
+      const nextStart = currentPage * ITEMS_PER_PAGE;
+      const nextPageItems = filtered.slice(nextStart, nextStart + ITEMS_PER_PAGE);
+      if (nextPageItems.length > 0) {
+        prefetchTimeout = setTimeout(() => {
+          prefetchTimeout = null;
+          ensureTranslations(nextPageItems, { mode: "preview", silent: true });
+        }, 180);
+      }
+    }
   }
 
   function renderPagination(totalItems, totalPages) {
@@ -1280,10 +1336,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     top.append(kickerRow, header);
 
-    if (displayJob.description) {
+    const cardExcerpt = displayJob.excerpt || displayJob.description;
+    if (cardExcerpt) {
       const excerpt = document.createElement("p");
       excerpt.className = "card-excerpt";
-      excerpt.textContent = displayJob.description;
+      excerpt.textContent = cardExcerpt;
       top.appendChild(excerpt);
     }
 
@@ -1345,7 +1402,7 @@ document.addEventListener("DOMContentLoaded", () => {
     modalDescription.textContent = displayJob.description || t("modalNoDesc");
     modalLink.href = getSafeUrl(job.link);
     jobModal.style.display = "flex";
-    ensureTranslations([job]);
+    ensureTranslations([job], { mode: "full" });
   }
 
   function closeModal() {
@@ -1381,6 +1438,7 @@ document.addEventListener("DOMContentLoaded", () => {
     stopButton.style.display = searching ? "inline-flex" : "none";
     statusSection.style.display = searching ? "flex" : "none";
     if (searching) {
+      clearPrefetch();
       lastCollectedCount = -1;
       lastStatusPayload = { status_code: "statusPreparing", status_params: {}, progress: 0 };
       statusText.textContent = t("statusPreparing");
