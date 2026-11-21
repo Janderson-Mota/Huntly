@@ -347,7 +347,8 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       'emptyTabMatchedTitle', 'emptyTabMatchedDesc',
       'emptyTabRecommendedTitle', 'emptyTabRecommendedDesc',
       'labelLimitJobs', 'limit25', 'limit50', 'limit75', 'limitUnlimited',
-      'translatedFromTo'
+      'translatedFromTo',
+      'ariaFooter', 'footerTagline', 'footerRights'
     ];
     for (const l of langs) {
       if ('labelEasyApply' in i18n[l]) {
@@ -599,5 +600,15 @@ def test_search_allows_empty_keywords_when_filter_selected_and_rejects_empty_for
     assert "f_TPR=r24h" in query
     assert "f_WT=2" in query
     assert "f_E=1%2C2" in query
+
+
+def test_home_renders_minimalist_footer(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    html = res.data.decode("utf-8")
+    assert '<footer class="site-footer"' in html
+    assert 'data-i18n="footerTagline"' in html
+    assert 'data-i18n="footerRights"' in html
+
 
 

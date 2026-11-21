@@ -52,6 +52,8 @@ body {
   color: var(--text-primary);
   line-height: 1.55;
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Navbar */
@@ -156,12 +158,14 @@ body {
 
 /* Main Container */
 .main-container {
+  width: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1.75rem 1.5rem 4rem;
+  padding: 1.75rem 1.5rem 3rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  flex: 1 0 auto;
 }
 
 /* Filters Panel */
@@ -944,9 +948,73 @@ select.form-control {
   justify-content: flex-end;
 }
 
+/* Site Footer */
+.site-footer {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  flex-shrink: 0;
+}
+
+.site-footer-inner {
+  border-top: 1px solid var(--border-light);
+  padding: 1.2rem 0 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  flex-wrap: wrap;
+}
+
+.footer-brand-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.footer-brand {
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+  transition: var(--transition);
+}
+
+.footer-brand:hover {
+  color: var(--accent-green);
+}
+
+.footer-separator {
+  color: var(--border-dark);
+  opacity: 0.45;
+  font-size: 0.85rem;
+}
+
+.footer-tagline {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.footer-meta {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
 @media (max-width: 1120px) {
   .main-container {
-    padding: 1.5rem 1.15rem 3.5rem;
+    padding: 1.5rem 1.15rem 3rem;
+  }
+
+  .site-footer {
+    padding: 0 1.15rem;
   }
 
   .filters-panel {
@@ -1011,6 +1079,17 @@ select.form-control {
 
   .quick-filter-box {
     max-width: none;
+  }
+
+  .site-footer-inner {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.45rem;
+  }
+
+  .footer-brand-group {
+    justify-content: center;
   }
 }
 
@@ -1152,5 +1231,23 @@ select.form-control {
 
   .modal-footer .btn {
     width: 100%;
+  }
+
+  .site-footer {
+    padding: 0 0.9rem;
+  }
+
+  .site-footer-inner {
+    padding: 1rem 0 1.5rem;
+  }
+
+  .footer-separator {
+    display: none;
+  }
+
+  .footer-brand-group {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
   }
 }
