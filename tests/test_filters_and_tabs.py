@@ -860,7 +860,7 @@ def test_translate_endpoint_post_load_batch_cache_and_safe_fallback(client):
         assert second.get_json() == first_data
         assert calls == []
 
-    # Network failure during on-demand full modal translation falls back safely to original text
+    # Network failure during on-demand full modal translation falls back safely without poisoning cache
     translator.clear_cache()
     with patch("translator.requests.post", side_effect=RuntimeError("translation upstream timeout")):
         fallback = client.post("/translate", json={"lang": "pt", "mode": "full", "job_ids": ["951"]})
@@ -869,6 +869,81 @@ def test_translate_endpoint_post_load_batch_cache_and_safe_fallback(client):
         assert fb_data["translations"]["951"]["title"] == "Frontend Engineer"
         assert fb_data["translations"]["951"]["description"] == "Short UI role"
         assert fb_data["translations"]["951"]["was_translated"] is False
+        assert fb_data["translations"]["951"]["source_lang"] is None
+        assert translator.cache_size() == 0
+
+
+def test_translate_single_batch_up_to_50_and_mymemory_fallback_on_429(client):
+    import requests
+    import translator
+
+    translator.clear_cache()
+
+    batch_jobs = [
+        {
+            "id": str(1000 + idx),
+            "title": f"Backend Engineer {idx}",
+            "description": f"Build APIs in Python and Docker #{idx}",
+        }
+        for idx in range(25)
+    ]
+    jobs_state.set_results(batch_jobs)
+
+    class RateLimitedResp:
+        status_code = 429
+
+        def raise_for_status(self):
+            raise requests.HTTPError("429 Too Many Requests", response=self)
+
+    mm_calls = []
+
+    class MyMemoryResp:
+        status_code = 200
+
+        def __init__(self, q):
+            self.q = q
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "responseStatus": 200,
+                "quotaFinished": False,
+                "responseData": {"translatedText": f"[MM-PT] {self.q}"},
+            }
+
+    def fake_get(url, params=None, headers=None, timeout=8):
+        mm_calls.append((url, params))
+        return MyMemoryResp(params["q"])
+
+    with (
+        patch("translator.requests.post", return_value=RateLimitedResp()),
+        patch("translator.requests.get", side_effect=fake_get),
+    ):
+        res = client.post(
+            "/translate",
+            json={"lang": "pt", "mode": "preview", "job_ids": [j["id"] for j in batch_jobs]},
+        )
+        assert res.status_code == 200
+        payload = res.get_json()
+        assert len(payload["translations"]) == 25
+        assert payload["translations"]["1000"]["title"] == "[MM-PT] Backend Engineer 0"
+        assert payload["translations"]["1024"]["excerpt"] == "[MM-PT] Build APIs in Python and Docker #24"
+        assert payload["translations"]["1000"]["was_translated"] is True
+        assert payload["translations"]["1000"]["source_lang"] == "en"
+        assert len(mm_calls) == 50
+
+        # Second call uses cache cleanly without hitting MyMemory or Google again
+        mm_calls.clear()
+        cached_res = client.post(
+            "/translate",
+            json={"lang": "pt", "mode": "preview", "job_ids": [j["id"] for j in batch_jobs]},
+        )
+        assert cached_res.status_code == 200
+        assert cached_res.get_json() == payload
+        assert mm_calls == []
+
 
 
 

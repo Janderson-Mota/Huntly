@@ -1,10 +1,16 @@
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import html
+import json
+import os
 import queue
 import re
+import tempfile
 import threading
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
+import unicodedata
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -24,14 +30,21 @@ TARGET_LANG_MAP: Dict[str, str] = {
 SUPPORTED_LANGS = set(TARGET_LANG_MAP.keys())
 
 TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
+MYMEMORY_URL = "https://api.mymemory.translated.net/get"
 MAX_CACHE_ENTRIES = 2000
 MAX_CHUNK_CHARS = 4500
+MYMEMORY_MAX_CHARS = 450
 PREVIEW_DESC_CHARS = 450
-MAX_BATCH_ITEMS = 20
-TRANSLATE_WORKERS = 8
+MAX_BATCH_ITEMS = 50
+TRANSLATE_WORKERS = 4
+GOOGLE_COOLDOWN_SECONDS = 300.0
+_CACHE_FILE = os.path.join(tempfile.gettempdir(), "huntly_translation_cache_v1.json")
 
 _ORIGINAL_REQUESTS_POST = requests.post
+_ORIGINAL_REQUESTS_GET = requests.get
 _session_pool: "queue.LifoQueue[requests.Session]" = queue.LifoQueue(maxsize=16)
+_google_lock = threading.Lock()
+_google_cooldown_until = 0.0
 
 _LATIN_STOPWORDS: Dict[str, Set[str]] = {
     "pt": {
@@ -79,14 +92,110 @@ _LATIN_STOPWORDS: Dict[str, Set[str]] = {
     },
 }
 
+_LANG_JOB_KEYWORDS: Dict[str, Set[str]] = {
+    "pt": {
+        "desenvolvedor", "desenvolvedora", "engenheiro", "engenheira", "estagio",
+        "estagiario", "estagiaria", "analista", "tecnico", "tecnica", "pleno",
+        "senior", "junior", "gerente", "coordenador", "diretor", "arquiteto",
+        "dados", "sistemas", "requisitos", "responsabilidades", "beneficios",
+        "remoto", "hibrido", "presencial", "empresa", "candidatos", "salario",
+    },
+    "en": {
+        "developer", "engineer", "engineering", "software", "backend", "frontend",
+        "fullstack", "architect", "analyst", "manager", "intern", "internship",
+        "junior", "senior", "lead", "principal", "staff", "remote", "hybrid",
+        "onsite", "scalable", "building", "designing", "services", "team",
+    },
+    "es": {
+        "desarrollador", "desarrolladora", "ingeniero", "ingeniera", "practicas",
+        "becario", "analista", "tecnico", "puesto", "requisitos", "funciones",
+        "beneficios", "sueldo", "remoto", "hibrido", "presencial", "datos",
+    },
+    "fr": {
+        "developpeur", "ingenieur", "stage", "stagiaire", "poste", "missions",
+        "competences", "profil", "avantages", "teletravail", "hybride", "donnees",
+    },
+    "it": {
+        "sviluppatore", "ingegnere", "tirocinio", "stage", "azienda", "requisiti",
+        "competenze", "ruolo", "remoto", "ibrido", "dati",
+    },
+    "de": {
+        "entwickler", "ingenieur", "praktikum", "stelle", "aufgaben", "profil",
+        "vorteile", "erfahrung", "kenntnisse", "daten",
+    },
+}
+
 _cache: "OrderedDict[Tuple[str, str], Tuple[str, Optional[str]]]" = OrderedDict()
 _cache_lock = threading.Lock()
 
 
+def _disk_cache_enabled() -> bool:
+    return "PYTEST_CURRENT_TEST" not in os.environ
+
+
+def _load_disk_cache() -> None:
+    if not _disk_cache_enabled() or not os.path.exists(_CACHE_FILE):
+        return
+    try:
+        with open(_CACHE_FILE, "r", encoding="utf-8") as fh:
+            raw_entries = json.load(fh)
+        if not isinstance(raw_entries, list):
+            return
+        with _cache_lock:
+            for item in raw_entries[-MAX_CACHE_ENTRIES:]:
+                if (
+                    isinstance(item, list)
+                    and len(item) == 4
+                    and isinstance(item[0], str)
+                    and isinstance(item[1], str)
+                    and isinstance(item[2], str)
+                ):
+                    key = (item[0], item[1])
+                    _cache[key] = (item[2], item[3] if isinstance(item[3], str) else None)
+            while len(_cache) > MAX_CACHE_ENTRIES:
+                _cache.popitem(last=False)
+    except Exception:
+        # Ignore missing or corrupt cache files
+        return
+
+
+def _save_disk_cache() -> None:
+    if not _disk_cache_enabled():
+        return
+    try:
+        with _cache_lock:
+            snapshot = [
+                [tl, digest, translated, src_lang]
+                for (tl, digest), (translated, src_lang) in _cache.items()
+            ]
+        fd, tmp_path = tempfile.mkstemp(prefix="huntly_cache_", suffix=".tmp", dir=tempfile.gettempdir())
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(snapshot, fh, ensure_ascii=False)
+            os.replace(tmp_path, _CACHE_FILE)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+    except Exception:
+        # Non-fatal: in-memory cache still works
+        return
+
+
+_load_disk_cache()
+
+
 def clear_cache() -> None:
-    """Clear the in-memory translation LRU cache."""
+    """Clear the in-memory and persistent translation LRU cache and reset upstream cooldown."""
+    global _google_cooldown_until
     with _cache_lock:
         _cache.clear()
+    with _google_lock:
+        _google_cooldown_until = 0.0
+    if _disk_cache_enabled() and os.path.exists(_CACHE_FILE):
+        try:
+            os.remove(_CACHE_FILE)
+        except Exception:
+            pass
 
 
 def cache_size() -> int:
@@ -205,6 +314,20 @@ def _build_pooled_session() -> requests.Session:
     return session
 
 
+def _get_pooled_session() -> requests.Session:
+    try:
+        return _session_pool.get_nowait()
+    except queue.Empty:
+        return _build_pooled_session()
+
+
+def _release_pooled_session(sess: requests.Session) -> None:
+    try:
+        _session_pool.put_nowait(sess)
+    except queue.Full:
+        sess.close()
+
+
 def _post_translation(chunk: str, tl: str, timeout: int) -> requests.Response:
     request_kwargs: Dict[str, Any] = {
         "params": {"client": "gtx", "sl": "auto", "tl": tl, "dt": "t"},
@@ -216,18 +339,42 @@ def _post_translation(chunk: str, tl: str, timeout: int) -> requests.Response:
     if requests.post is not _ORIGINAL_REQUESTS_POST:
         return requests.post(TRANSLATE_URL, **request_kwargs)
 
-    try:
-        sess = _session_pool.get_nowait()
-    except queue.Empty:
-        sess = _build_pooled_session()
-
+    sess = _get_pooled_session()
     try:
         return sess.post(TRANSLATE_URL, **request_kwargs)
     finally:
-        try:
-            _session_pool.put_nowait(sess)
-        except queue.Full:
-            sess.close()
+        _release_pooled_session(sess)
+
+
+def _get_mymemory(sub_chunk: str, src_code: str, tl: str, timeout: int) -> requests.Response:
+    request_kwargs: Dict[str, Any] = {
+        "params": {"q": sub_chunk, "langpair": f"{src_code}|{tl}"},
+        "headers": {"User-Agent": "Mozilla/5.0"},
+        "timeout": timeout,
+    }
+    if requests.get is not _ORIGINAL_REQUESTS_GET:
+        return requests.get(MYMEMORY_URL, **request_kwargs)
+
+    sess = _get_pooled_session()
+    try:
+        return sess.get(MYMEMORY_URL, **request_kwargs)
+    finally:
+        _release_pooled_session(sess)
+
+
+def _google_in_cooldown() -> bool:
+    if requests.post is not _ORIGINAL_REQUESTS_POST:
+        return False
+    with _google_lock:
+        return time.monotonic() < _google_cooldown_until
+
+
+def _mark_google_rate_limited() -> None:
+    if requests.post is not _ORIGINAL_REQUESTS_POST:
+        return
+    with _google_lock:
+        global _google_cooldown_until
+        _google_cooldown_until = max(_google_cooldown_until, time.monotonic() + GOOGLE_COOLDOWN_SECONDS)
 
 
 def _is_already_target_language(text: str, target_lang: str) -> bool:
@@ -287,8 +434,92 @@ def _build_preview_snippet(text: str, max_chars: int = PREVIEW_DESC_CHARS) -> st
     return sliced.rstrip() or text[:max_chars]
 
 
-def _request_chunk_translation(chunk: str, tl: str, timeout: int) -> Tuple[str, Optional[str]]:
+def _detect_source_language(text: str, target_lang: str) -> str:
+    """Heuristically infer source language for providers requiring an explicit langpair."""
+    if not text:
+        return "en" if target_lang != "en" else "pt"
+
+    alpha_chars = [ch for ch in text if ch.isalpha()]
+    if alpha_chars:
+        cyrillic_chars = [ch for ch in alpha_chars if "\u0400" <= ch <= "\u04ff"]
+        if len(cyrillic_chars) >= 3 and (len(cyrillic_chars) / len(alpha_chars)) >= 0.5:
+            return "ru"
+    non_punct = [ch for ch in text if ch.isalnum()]
+    if non_punct:
+        cjk_chars = [ch for ch in non_punct if "\u4e00" <= ch <= "\u9fff"]
+        if len(cjk_chars) >= 2 and (len(cjk_chars) / len(non_punct)) >= 0.4:
+            return "zh"
+
+    lower = text.lower()
+    scores: Dict[str, int] = {lang: 0 for lang in _LANG_JOB_KEYWORDS}
+    if any(ch in lower for ch in "ãõçêâô"):
+        scores["pt"] += 3
+    if "ñ" in lower or "¿" in lower or "¡" in lower:
+        scores["es"] += 3
+    if "ß" in lower or "ä" in lower or "ö" in lower or "ü" in lower:
+        scores["de"] += 2
+    if any(ch in lower for ch in "àèéìòù") and any(tok in lower for tok in ("svilupp", "lavoro", "azienda", "di ", "per ")):
+        scores["it"] += 2
+    if any(ch in lower for ch in "éèêàçôù") and any(tok in lower for tok in ("développ", "ingénieur", "poste", "chez", "avec")):
+        scores["fr"] += 3
+
+    norm_lower = "".join(
+        ch for ch in unicodedata.normalize("NFD", lower) if unicodedata.category(ch) != "Mn"
+    )
+    words = re.findall(r"[a-z]+", norm_lower)
+    for w in words:
+        for lang_code, sw_set in _LATIN_STOPWORDS.items():
+            norm_sw = {
+                "".join(ch for ch in unicodedata.normalize("NFD", s) if unicodedata.category(ch) != "Mn")
+                for s in sw_set
+            }
+            if w in norm_sw:
+                scores[lang_code] += 2
+        for lang_code, kw_set in _LANG_JOB_KEYWORDS.items():
+            if w in kw_set:
+                scores[lang_code] += 2
+
+    best_lang, best_score = max(scores.items(), key=lambda kv: kv[1])
+    if best_score > 0:
+        return best_lang
+    return "en" if target_lang != "en" else "pt"
+
+
+def _request_mymemory_translation(text: str, lang_key: str, timeout: int) -> Tuple[str, Optional[str]]:
+    src_lang = _detect_source_language(text, lang_key)
+    if src_lang == lang_key:
+        return text, lang_key
+
+    src_code = TARGET_LANG_MAP.get(src_lang, "en")
+    tl_code = TARGET_LANG_MAP[lang_key]
+    sub_chunks = _split_chunks(text, MYMEMORY_MAX_CHARS)
+    translated_parts: List[str] = []
+
+    for sub in sub_chunks:
+        res = _get_mymemory(sub, src_code, tl_code, timeout)
+        res.raise_for_status()
+        payload = res.json()
+        if not isinstance(payload, dict) or payload.get("quotaFinished"):
+            raise ValueError("MyMemory quota exhausted or invalid payload")
+        if int(payload.get("responseStatus") or 0) != 200:
+            raise ValueError(f"MyMemory error status: {payload.get('responseStatus')}")
+        raw_trans = (payload.get("responseData") or {}).get("translatedText")
+        if not isinstance(raw_trans, str) or not raw_trans.strip():
+            raise ValueError("Empty MyMemory translation")
+        cleaned = html.unescape(raw_trans).strip()
+        upper = cleaned.upper()
+        if upper.startswith("MYMEMORY WARNING") or "INVALID LANGUAGE PAIR" in upper:
+            raise ValueError(f"MyMemory warning payload: {cleaned}")
+        translated_parts.append(cleaned)
+
+    joined = translated_parts[0] if len(translated_parts) == 1 else "\n\n".join(translated_parts)
+    return joined, src_lang
+
+
+def _request_google_chunk(chunk: str, tl: str, timeout: int) -> Tuple[str, Optional[str]]:
     res = _post_translation(chunk, tl, timeout)
+    if getattr(res, "status_code", None) in (429, 403):
+        _mark_google_rate_limited()
     res.raise_for_status()
     payload = res.json()
     if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
@@ -300,15 +531,39 @@ def _request_chunk_translation(chunk: str, tl: str, timeout: int) -> Tuple[str, 
     return translated, detected_src
 
 
+def _request_chunk_translation(chunk: str, tl: str, timeout: int) -> Tuple[str, Optional[str]]:
+    lang_key = _normalize_lang_code(tl) or "en"
+    allow_mymemory = (requests.post is _ORIGINAL_REQUESTS_POST) or (requests.get is not _ORIGINAL_REQUESTS_GET)
+
+    if not _google_in_cooldown():
+        try:
+            return _request_google_chunk(chunk, tl, timeout)
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            if status in (429, 403):
+                _mark_google_rate_limited()
+            if not allow_mymemory:
+                raise
+        except Exception:
+            if not allow_mymemory:
+                raise
+
+    if not allow_mymemory:
+        raise RuntimeError("Upstream translation unavailable")
+
+    return _request_mymemory_translation(chunk, lang_key, timeout)
+
+
 def _translate_texts_parallel(
     texts: List[str], lang_key: str, timeout: int = 8
 ) -> Dict[str, Tuple[str, Optional[str]]]:
-    """Translate unique non-empty strings using cache, fast-path and flat parallel chunks."""
+    """Translate unique non-empty strings using cache, fast-path, Google gtx, and MyMemory fallback."""
     tl = TARGET_LANG_MAP[lang_key]
     resolved: Dict[str, Tuple[str, Optional[str]]] = {}
     pending_chunks_by_text: Dict[str, List[str]] = {}
     unique_chunks: List[str] = []
     seen_chunks: Set[str] = set()
+    any_new_cache_entry = False
 
     for raw in texts:
         if (
@@ -327,6 +582,7 @@ def _translate_texts_parallel(
 
         if _is_already_target_language(raw, lang_key):
             _cache_put(tl, raw, raw, lang_key)
+            any_new_cache_entry = True
             resolved[raw] = (raw, lang_key)
             continue
 
@@ -376,7 +632,11 @@ def _translate_texts_parallel(
                 translated_parts[0] if len(translated_parts) == 1 else "\n\n".join(translated_parts)
             )
             _cache_put(tl, raw, translated, source_lang)
+            any_new_cache_entry = True
             resolved[raw] = (translated, source_lang)
+
+    if any_new_cache_entry:
+        _save_disk_cache()
 
     return resolved
 

@@ -346,7 +346,7 @@ def translate_job_cards():
         if raw_mode not in ("full", "preview"):
             raise _ValidationError("Modo de tradução inválido.", "errInvalidPayload")
 
-        job_ids = _parse_str_list(params.get("job_ids"))[:20]
+        job_ids = _parse_str_list(params.get("job_ids"))[:50]
         target_items: List[Dict[str, Any]] = []
         if job_ids:
             jobs_by_id = {
@@ -361,7 +361,7 @@ def translate_job_cards():
             raw_items = params.get("items")
             if not isinstance(raw_items, list):
                 raise _ValidationError("Lista de vagas inválida.", "errInvalidPayload")
-            for raw in raw_items[:20]:
+            for raw in raw_items[:50]:
                 if not isinstance(raw, dict):
                     continue
                 jid = _parse_str(raw.get("id"), max_len=64)
