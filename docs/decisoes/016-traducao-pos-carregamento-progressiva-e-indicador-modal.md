@@ -1,37 +1,38 @@
-# ADR 016 — Tradução Pós-Carregamento em Lote Único, Fallback MyMemory e Indicador no Modal
+# ADR 016 — Tradução Pós-Carregamento em Lote Único, Cache SQLite, Execução Paralela e Mapeamento Completo
 
 **Status:** Aceito  
 **Data:** 2026-11-21
 
 ## Contexto
 
-Nos testes manuais em ambiente local, duas falhas foram observadas quando o navegador disparava diversas chamadas seguidas a `POST /translate` após `GET /results?type=jobs`:
+Para que a tradução assíncrona funcione de maneira consistente em todos os idiomas da interface (`pt`, `en`, `es`, `fr`, `it`, `de`, `ru`, `zh`/`zh-CN`, além de variantes regionais e `ja`), reaja instantaneamente ao trocar o seletor de idioma sem perder os textos originais da vaga e elimine gargalos de ~10 segundos em lotes de `25–50` cards, era necessário:
 
-1. **Disparos múltiplos e saturação upstream (`429`):** Dividir a página em sub-lotes de 3 cards + prefetch da página seguinte + re-disparos em trocas de página/aba gerava dezenas de chamadas simultâneas e múltiplas requisições concorrentes em `translator.py` contra `translate.googleapis.com`, levando ao retorno `HTTP 429 Too Many Requests` (`/sorry/index`).
-2. **Fallback silencioso e envenenamento de cache:** Quando o tradutor falhava, `translator.py` devolvia o texto original com `source_lang: None` e `was_translated: False` em `HTTP 200`, e `static/script.js` gravava essa resposta não traduzida em `translationCache` / `sessionStorage`, impedindo novas tentativas e deixando os cards no idioma original. Além disso, o lote máximo de `/translate` estava limitado a `20` itens frente às buscas de `25–50` vagas.
+1. Normalizar explicitamente os códigos de idioma na rota `POST /translate` (`app.py`) e em `translator.py` (`zh-CN`, `pt-BR`, `ja`, etc.).
+2. Preservar `original_title`, `original_excerpt` e `original_description` separados das traduções em memória (`item._translations[lang]`) em `static/script.js`.
+3. Reduzir drasticamente a latência do lote com consulta em lote ao cache persistente antes da rede, agrupamento em blocos com delimitador seguro e fallback paralelo com `ThreadPoolExecutor(max_workers=10)`.
 
 ## Decisão
 
-1. **Requisição única em lote pós-busca e preservação em memória (`static/script.js`, `app.py`):**
-   - Elevado o limite de lote de `20` para `50` vagas em `/translate` (`app.py`) e em `MAX_BATCH_ITEMS` (`translator.py`).
-   - Removido o chunking em blocos de 3 e os gatilhos automáticos dentro de `renderFilteredResults()` e `prefetchTimeout`: agora o front-end dispara **1 única chamada `POST /translate`** em `mode=preview` após o término da busca (`pollResults()` / `stopSearch()`) ou ao trocar o idioma da página (`applyLanguage()`), cobrindo até 50 vagas coletadas nas duas abas (`Correspondentes` e `Talvez você goste`).
-   - Cada tradução válida (`isValidTranslationEntry`, exigindo `source_lang || was_translated`) passa a ser salva tanto em `localStorage` (`huntly_translations_cache_v4`, até 250 entradas) quanto diretamente no objeto da vaga em `searchResults` via `item._translations[lang]`. Trocar de aba, paginar ou aplicar filtros rápidos/exclusão lê do estado em memória com **zero** chamadas extras.
-   - Respostas de fallback em falha (`source_lang: null, was_translated: false`) nunca são gravadas no cache do navegador nem no back-end.
+1. **Mapeamento explícito de idiomas e detecção (`translator.py`, `app.py`):**
+   - Expandido `TARGET_LANG_MAP` com `"pt"`, `"en"`, `"es"`, `"fr"`, `"it"`, `"de"`, `"ru"`, `"zh": "zh-CN"` e `"ja": "ja"`, com normalizador público `normalize_target_lang()` consumido diretamente em `POST /translate` (aceitando variantes como `pt-BR`, `en-US`, `zh-CN`, `zh-Hans`, `ja-JP` e rejeitando apenas códigos inválidos com HTTP 400).
+   - Adicionada detecção específica de japonês (Hiragana/Katakana `\u3040-\u30ff`) distinta de caracteres CJK chineses.
 
-2. **Fallback automático MyMemory + cooldown e cache persistente (`translator.py`):**
-   - Reduzido `TRANSLATE_WORKERS` de `8` para `4` para suavizar concorrência upstream.
-   - Adicionado cooldown global de 300s para Google `gtx` após `HTTP 429`/`403` e fallback automático para a API pública REST do MyMemory (`https://api.mymemory.translated.net/get`, com sub-chunks de até 450 caracteres e detecção heurística conservadora de idioma-fonte `_detect_source_language()`), mantendo compatibilidade com os mocks de `requests.post` na suíte de testes e fallback seguro para o texto original quando ambos os provedores falharem.
-   - Adicionada persistência leve do cache LRU em arquivo temporário (`huntly_translation_cache_v1.json`, desativada durante execuções `pytest`) para evitar re-traduções entre reinícios locais.
+2. **Preservação de originais e re-tradução imediata na troca de idioma (`static/script.js`):**
+   - `normalizeJobRecord()` fixa `original_title`, `original_excerpt` e `original_description` em cada vaga carregada em `searchResults`, mantendo as traduções isoladas em `item._translations[lang]` e `localStorage` (`huntly_translations_cache_v4`).
+   - Ao alterar `#lang-select`, `applyLanguage()` hidrata imediatamente qualquer tradução já em cache para o novo idioma e dispara **1 única chamada em lote `POST /translate`** apenas para as vagas ainda não cacheadas naquele idioma, mantendo o filtro rápido operando simultaneamente sobre originais e traduzidos.
+   - Respostas falhas sem tradução válida nunca são gravadas no cache; trocar de aba (`matched` / `recommended`) ou filtrar localmente não dispara novas requisições.
 
-3. **Indicador discreto sob demanda no modal (`templates/index.html`, `static/styles.css`, `static/i18n.js`, `static/script.js`):**
-   - Ao abrir **Ver detalhes** (`openJobModal`), caso `job.description` exista e ainda não tenha `is_full: true` em cache, `#modal-translating-indicator` é exibido enquanto `POST /translate` (`mode=full`) traduz a descrição completa, atualizando modal e card e ocultando o indicador em `finally` / `closeModal()`.
+3. **Cache persistente SQLite + empacotamento por delimitador + 10 workers (`translator.py`):**
+   - Substituído o JSON temporário por banco SQLite persistente em `huntly_translation_cache.sqlite3` (modo WAL, limite `5000` entradas, configurável via `configure_cache_db()`), consultado em lote (`_sqlite_batch_get`) **antes** de qualquer chamada HTTP e atualizado em bloco (`_sqlite_batch_put`) ao final do lote.
+   - Para chamadas vivas ao Google `gtx`, textos curtos são empacotados em blocos com delimitador indexado (`[[[HUNTLY_SEP_n]]]`, até 12 textos / 3.600 caracteres por bloco) e validados por contagem e ordem exata dos marcadores; em caso de delimitador corrompido ou execução individual, o pipeline executa em paralelo com `ThreadPoolExecutor(max_workers=10)`.
+   - Mantidos cooldown de 300s após `HTTP 429`/`403` do Google e fallbacks para MyMemory REST (suportando `MYMEMORY_EMAIL` opcional para maior cota diária) e `LIBRETRANSLATE_URL` opcional.
 
 ## Alternativas Descartadas
 
-- **Manter sub-lotes concorrentes por página e prefetch automático:** descartado por multiplicar chamadas simultâneas e provocar bloqueios `429` no tradutor gratuito.
-- **Persistir entradas sem tradução (`source_lang: null`) no cache do navegador:** descartado por cristalizar falhas temporárias e impedir tradução após recuperação.
+- **Loop sequencial por vaga em `POST /translate`:** descartado pois `25–50` requisições em série levavam ~10 segundos e saturavam o endpoint síncrono.
+- **Sobrescrever `job.title` / `job.description` in-place no objeto recebido:** descartado pois corrompia a comparação original ao alternar para múltiplos idiomas seguidos ou aplicar o filtro rápido sobre termos originais.
 
 ## Consequências
 
-- **Positivas:** Cada busca gera no máximo 1 chamada em lote `POST /translate` para os cards (e no máximo 1 chamada pontual sob demanda no modal para descrições longas), com atualização imediata dos cards em tela, preservação garantida ao trocar de aba/filtrar e resiliência automática via MyMemory quando Google limita requisições.
-- **Negativas / Pontos de atenção:** Em buscas de até 50 vagas com títulos/resumos inéditos em cold start via MyMemory, a única chamada em lote pode levar alguns segundos até retornar todos os cards de uma vez e atualizar a grade simultaneamente.
+- **Positivas:** Suporte completo a todos os idiomas com códigos normalizados, alternância fluida entre idiomas no cabeçalho reaproveitando o cache local sem custo de rede, filtro preservado em textos originais/traduzidos e aceleração paralela (`10` workers) somada a cache SQLite em lote.
+- **Negativas / Pontos de atenção:** Provedores gratuitos públicos sem chave (Google `gtx` anônimo e cota anônima do MyMemory) ainda podem aplicar `HTTP 429` por IP compartilhado após muitas requisições no mesmo dia; quando ocorre, o aplicativo preserva os textos originais com segurança sem envenenar o cache e permite ampliar cota via variáveis de ambiente (`MYMEMORY_EMAIL` ou `LIBRETRANSLATE_URL`).
