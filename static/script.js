@@ -202,6 +202,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const ITEMS_PER_PAGE = 9;
+  const SESSION_TRANSLATIONS_KEY = "huntly_translations_cache";
+  const MAX_SESSION_TRANSLATIONS = 200;
   let isSearching = false;
   let searchResults = [];
   let currentPage = 1;
@@ -210,6 +212,107 @@ document.addEventListener("DOMContentLoaded", () => {
   let activeModalJob = null;
   let lastStatusPayload = null;
   let lastFeedback = null;
+  const translationCache = loadSessionTranslations();
+  const translationInFlight = new Set();
+
+  function loadSessionTranslations() {
+    const cache = new Map();
+    try {
+      const raw = sessionStorage.getItem(SESSION_TRANSLATIONS_KEY);
+      if (!raw) return cache;
+      const entries = JSON.parse(raw);
+      if (Array.isArray(entries)) {
+        entries.slice(-MAX_SESSION_TRANSLATIONS).forEach(([k, v]) => {
+          if (typeof k === "string" && v && typeof v === "object") {
+            cache.set(k, v);
+          }
+        });
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return cache;
+  }
+
+  function saveSessionTranslations() {
+    try {
+      const entries = Array.from(translationCache.entries()).slice(-MAX_SESSION_TRANSLATIONS);
+      sessionStorage.setItem(SESSION_TRANSLATIONS_KEY, JSON.stringify(entries));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
+  function getDisplayJob(job) {
+    if (!job || currentLang === "pt" || !job.id) return job;
+    const cached = translationCache.get(`${currentLang}:${job.id}`);
+    if (!cached) return job;
+    return {
+      ...job,
+      title: cached.title || job.title,
+      description: cached.description || job.description,
+    };
+  }
+
+  async function ensureTranslations(jobsToTranslate) {
+    if (currentLang === "pt" || !Array.isArray(jobsToTranslate) || !jobsToTranslate.length) {
+      return;
+    }
+    const targetLang = currentLang;
+    const pendingJobs = jobsToTranslate.filter((job) => {
+      if (!job || !job.id || (!job.title && !job.description)) return false;
+      const cacheKey = `${targetLang}:${job.id}`;
+      return !translationCache.has(cacheKey) && !translationInFlight.has(cacheKey);
+    });
+    if (!pendingJobs.length) return;
+
+    const batch = pendingJobs.slice(0, 20);
+    const jobIds = batch.map((job) => String(job.id));
+    jobIds.forEach((jid) => translationInFlight.add(`${targetLang}:${jid}`));
+
+    try {
+      const response = await fetch("/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lang: targetLang, job_ids: jobIds }),
+      });
+      if (!response.ok) return;
+
+      const payload = await response.json();
+      const translations = payload && typeof payload.translations === "object" ? payload.translations : null;
+      if (!translations) return;
+
+      let updated = false;
+      Object.entries(translations).forEach(([jid, translated]) => {
+        if (translated && typeof translated === "object") {
+          const cacheKey = `${targetLang}:${jid}`;
+          if (translationCache.size >= MAX_SESSION_TRANSLATIONS) {
+            const oldestKey = translationCache.keys().next().value;
+            if (oldestKey) translationCache.delete(oldestKey);
+          }
+          translationCache.set(cacheKey, {
+            title: translated.title || "",
+            description: translated.description || "",
+          });
+          updated = true;
+        }
+      });
+
+      if (updated) {
+        saveSessionTranslations();
+        if (currentLang === targetLang) {
+          renderFilteredResults();
+          if (jobModal.style.display !== "none" && activeModalJob && translations[String(activeModalJob.id)]) {
+            openJobModal(activeModalJob);
+          }
+        }
+      }
+    } catch {
+      // Safe fallback: keep original card texts
+    } finally {
+      jobIds.forEach((jid) => translationInFlight.delete(`${targetLang}:${jid}`));
+    }
+  }
 
   function readStorage(key, fallback) {
     try {
@@ -513,7 +616,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const filtered = !term
       ? searchResults
       : searchResults.filter((item) => {
-          const haystack = [item.title, item.company, item.location, item.description]
+          const display = getDisplayJob(item);
+          const haystack = [
+            item.title,
+            item.company,
+            item.location,
+            item.description,
+            display.title,
+            display.description,
+          ]
             .filter(Boolean)
             .join(" ")
             .toLowerCase();
@@ -557,6 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     renderPagination(filtered.length, totalPages);
+    ensureTranslations(pageItems);
   }
 
   function renderPagination(totalItems, totalPages) {
@@ -869,6 +981,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function createJobCard(job, index = 0, isSeen = false) {
+    const displayJob = getDisplayJob(job);
     const card = document.createElement("article");
     card.className = `result-card${isSeen ? " is-seen" : ""}`;
     const safeLink = getSafeUrl(job.link);
@@ -903,7 +1016,7 @@ document.addEventListener("DOMContentLoaded", () => {
     header.className = "card-header";
     const title = document.createElement("h3");
     title.className = "card-title";
-    title.textContent = job.title || t("cardTitleFallback");
+    title.textContent = displayJob.title || t("cardTitleFallback");
     const company = document.createElement("p");
     company.className = "card-subtitle";
     company.textContent = job.company || t("cardCompanyFallback");
@@ -921,10 +1034,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     top.append(kickerRow, header);
 
-    if (job.description) {
+    if (displayJob.description) {
       const excerpt = document.createElement("p");
       excerpt.className = "card-excerpt";
-      excerpt.textContent = job.description;
+      excerpt.textContent = displayJob.description;
       top.appendChild(excerpt);
     }
 
@@ -957,7 +1070,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function openJobModal(job) {
     activeModalJob = job;
-    modalTitle.textContent = job.title || t("cardTitleFallback");
+    const displayJob = getDisplayJob(job);
+    modalTitle.textContent = displayJob.title || t("cardTitleFallback");
     modalCompany.textContent = job.company || "";
     modalBadges.innerHTML = "";
     const formattedTime = formatRelativeTime(job.time);
@@ -972,9 +1086,10 @@ document.addEventListener("DOMContentLoaded", () => {
       modalBadges.appendChild(createMetaBadge("bi bi-briefcase", employmentType));
     }
 
-    modalDescription.textContent = job.description || t("modalNoDesc");
+    modalDescription.textContent = displayJob.description || t("modalNoDesc");
     modalLink.href = getSafeUrl(job.link);
     jobModal.style.display = "flex";
+    ensureTranslations([job]);
   }
 
   function closeModal() {

@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 from flask import Flask, Response, jsonify, render_template, request
 
 from scraper import jobs_state, search_jobs_thread
+from translator import SUPPORTED_LANGS, translate_jobs_batch
 
 app = Flask(__name__)
 _debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
@@ -190,6 +191,58 @@ def get_job_details(job_id: str):
     if job:
         return jsonify(job)
     return jsonify({"error": "Vaga não encontrada.", "error_code": "errJobNotFound"}), 404
+
+
+@app.route("/translate", methods=["POST"])
+def translate_job_cards():
+    try:
+        params = request.get_json(silent=True)
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            return jsonify({"error": "Payload JSON deve ser um objeto.", "error_code": "errInvalidPayload"}), 400
+
+        lang = _parse_str(params.get("lang"), max_len=10).lower()
+        if lang not in SUPPORTED_LANGS:
+            return jsonify({"error": "Idioma não suportado.", "error_code": "errInvalidLanguage"}), 400
+
+        if lang == "pt":
+            return jsonify({"lang": "pt", "translations": {}}), 200
+
+        job_ids = _parse_str_list(params.get("job_ids"))[:20]
+        target_items: List[Dict[str, Any]] = []
+        if job_ids:
+            jobs_by_id = {
+                str(item.get("id")): item
+                for item in jobs_state.get_results()
+                if item.get("id") and not item.get("error")
+            }
+            for jid in job_ids:
+                if jid in jobs_by_id:
+                    target_items.append(jobs_by_id[jid])
+        elif "items" in params:
+            raw_items = params.get("items")
+            if not isinstance(raw_items, list):
+                raise _ValidationError("Lista de vagas inválida.", "errInvalidPayload")
+            for raw in raw_items[:20]:
+                if not isinstance(raw, dict):
+                    continue
+                jid = _parse_str(raw.get("id"), max_len=64)
+                if not jid:
+                    continue
+                title = _parse_str(raw.get("title"), max_len=500) if raw.get("title") is not None else None
+                desc = _parse_str(raw.get("description"), max_len=15000) if raw.get("description") is not None else None
+                target_items.append({"id": jid, "title": title, "description": desc})
+
+        translations = translate_jobs_batch(target_items, lang)
+        return jsonify({"lang": lang, "translations": translations}), 200
+
+    except _ValidationError as exc:
+        return jsonify({"error": str(exc), "error_code": exc.code}), 400
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "error_code": "errInvalidPayload"}), 400
+    except Exception:
+        return jsonify({"error": "Erro ao traduzir vagas.", "error_code": "errGeneric"}), 500
 
 
 def _sanitize_csv_cell(value: Any) -> Any:
