@@ -20,10 +20,11 @@
   <header class="navbar">
     <div class="navbar-inner">
       <a class="navbar-brand" href="#">huntly.</a>
-      <nav class="navbar-links">
+      <nav class="navbar-nav" aria-label="Navegação principal" data-i18n-aria-label="ariaMainNav">
         <a href="#filtros" class="nav-link" data-i18n="navFilters">filtros</a>
         <a href="#resultados" class="nav-link" data-i18n="navResults">resultados</a>
-  
+      </nav>
+      <div class="navbar-controls">
         <select id="lang-select" class="lang-select" aria-label="Idioma" data-i18n-aria-label="ariaLangSelect">
           <option value="pt">🇧🇷 Português</option>
           <option value="en">🇺🇸 English</option>
@@ -37,7 +38,7 @@
         <button type="button" id="theme-toggle-btn" class="theme-toggle-btn" aria-label="Alternar tema" data-i18n-aria-label="ariaThemeToggle">
           <i class="bi bi-moon" id="theme-icon"></i>
         </button>
-      </nav>
+      </div>
     </div>
   </header>
 
