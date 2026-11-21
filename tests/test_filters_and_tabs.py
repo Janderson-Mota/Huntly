@@ -11,6 +11,7 @@ from scraper import (
     build_experience_search_queries,
     build_params,
     classify_job_match,
+    detect_description_experience_levels,
     detect_title_experience_levels,
     detect_work_mode,
     get_job_count,
@@ -745,6 +746,58 @@ def test_search_jobs_thread_uses_enriched_queries_and_balanced_multilevel_cap():
     assert intern_count == 13
     assert jr_count == 12
     assert all(r["match_category"] == "matched" for r in results)
+
+
+def test_tech_lead_and_all_levels_match_tab1_even_with_not_applicable_metadata():
+    levels_cases = [
+        ({"title": "Tech Lead PHP", "experience_level_code": "not_applicable"}, ["tech_lead"], "matched"),
+        ({"title": "Technical Lead - Backend", "experience_level_code": "not_applicable"}, ["tech_lead"], "matched"),
+        ({"title": "Líder Técnico PHP", "experience_level_code": "not_applicable"}, ["tech_lead"], "matched"),
+        ({"title": "PHP Lead", "experience_level_code": "not_applicable"}, ["tech_lead"], "matched"),
+        ({"title": "Estágio em PHP", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "PHP Internship", "experience_level_code": "not_applicable"}, ["1"], "matched"),
+        ({"title": "Programa de Trainee", "experience_level_code": "not_applicable"}, ["trainee"], "matched"),
+        ({"title": "Desenvolvedor PHP Jr", "experience_level_code": "not_applicable"}, ["2"], "matched"),
+        ({"title": "Desenvolvedor PHP Pleno", "experience_level_code": "not_applicable"}, ["3,4"], "matched"),
+        ({"title": "Senior PHP Engineer", "experience_level_code": "not_applicable"}, ["4"], "matched"),
+        ({"title": "Head de Engenharia", "experience_level_code": "not_applicable"}, ["5,6"], "matched"),
+        ({"title": "Diretor de Tecnologia", "experience_level_code": "not_applicable"}, ["5,6"], "matched"),
+        # Conflicting explicit titles remain in Aba 2 ('recommended')
+        ({"title": "Senior PHP Developer", "experience_level_code": "not_applicable"}, ["1"], "recommended"),
+        ({"title": "Estágio em PHP", "experience_level_code": "not_applicable"}, ["tech_lead"], "recommended"),
+        ({"title": "Desenvolvedor Júnior", "experience_level_code": "not_applicable"}, ["4"], "recommended"),
+    ]
+    for job, exp_filter, expected_tab in levels_cases:
+        assert classify_job_match(job, experience_level=exp_filter) == expected_tab, (
+            f"Unexpected category for {job} with {exp_filter}"
+        )
+
+
+def test_description_semantics_match_role_and_ignore_incidental_mentions():
+    intern_from_desc = {
+        "title": "Desenvolvedor PHP",
+        "experience_level_code": "not_applicable",
+        "description": "Vaga de estágio em desenvolvimento PHP com bolsa-auxílio para cursando ensino superior.",
+    }
+    assert classify_job_match(intern_from_desc, experience_level=["1"]) == "matched"
+    assert classify_job_match(intern_from_desc, experience_level=["4"]) == "recommended"
+
+    lead_from_desc = {
+        "title": "Engenheiro de Software",
+        "experience_level_code": "not_applicable",
+        "description": "Buscamos um Tech Lead para liderar a squad de pagamentos em arquitetura distribuída.",
+    }
+    assert classify_job_match(lead_from_desc, experience_level=["tech_lead"]) == "matched"
+
+    incidental_mentions = {
+        "title": "Desenvolvedor PHP",
+        "experience_level_code": "not_applicable",
+        "description": "Você reporta ao Diretor de Engenharia e ajuda a mentorar juniores no dia a dia.",
+    }
+    assert detect_description_experience_levels(incidental_mentions["description"]) == set()
+    assert classify_job_match(incidental_mentions, experience_level=["5,6"]) == "recommended"
+    assert classify_job_match(incidental_mentions, experience_level=["2"]) == "recommended"
+
 
 
 

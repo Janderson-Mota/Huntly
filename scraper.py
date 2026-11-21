@@ -431,13 +431,97 @@ _TITLE_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
     (
         "tech_lead",
         (
-            re.compile(r"\btech\s+lead\b|\bteam\s+lead\b|\blider\s+tecnic[oa]\b|\bengineering\s+lead\b|\blead\s+(?:engineer|developer|architect|analyst|designer|scientist|qa|sre|devops)\b|\b(?:software|backend|frontend|full\s*stack|mobile|data|qa|devops|cloud|platform|security)\s+lead\b", re.IGNORECASE),
+            re.compile(
+                r"\btech[\s-]?lead(?:er)?\b|\btechlead\b|\btechnical\s+lead(?:er)?\b|\bteam\s+lead(?:er)?\b"
+                r"|\blider\s+(?:tecnic[oa]|de\s+tecnologia)\b|\blideranca\s+tecnica\b|\bengineering\s+lead\b"
+                r"|\bdev\s+lead\b|\blead\s+(?:dev|engineer|developer|architect|analyst|designer|scientist|qa|sre|devops)\b"
+                r"|\b(?:software|backend|back-end|frontend|front-end|full[\s-]?stack|mobile|data|qa|devops|cloud|platform|security|php|python|java|node|react|angular|vue|go|golang|rust|ruby|dotnet|ios|android|flutter)\s+lead\b"
+                r"|(?<!\w)\.net\s+lead\b",
+                re.IGNORECASE,
+            ),
         ),
     ),
     (
         "director",
         (
-            re.compile(r"\bdiretor(?:a)?\b|\bdirector\b|\bdirettore\b|\bdirektor\b|\bdirecteur\b|\bhead\s+of\b|\bhead\s+de\b|\bvp\b|\bvice\s+president\b|\bchief\b|\bcto\b|\bcio\b|\bciso\b|\bcpo\b|\bceo\b|\bcfo\b|\bexecutiv[oa]\b|\bexecutive\b|\bengineering\s+manager\b", re.IGNORECASE),
+            re.compile(
+                r"\bdiretor(?:a)?\b|\bdirector\b|\bdirettore\b|\bdirektor\b|\bdirecteur\b"
+                r"|^\s*head\b|\bhead\s+(?:of|de|em)\b|\bhead\s+(?:tecnologia|engenharia|ti|it|tech|engineering|dados|data|produto|product|software|arquitetura|seguranca|security|cloud|infraestrutura)\b"
+                r"|\bvp\b|\bvice\s+president\b|\bchief\b|\bcto\b|\bcio\b|\bciso\b|\bcpo\b|\bceo\b|\bcfo\b|\bexecutiv[oa]\b|\bexecutive\b|\bengineering\s+manager\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+)
+
+_DESC_ROLE_PREFIX = r"(?:vaga|cargo|posicao|oportunidade|nivel|senioridade|buscamos|procuramos|contratamos|atuar(?:a)?\s+como|hiring|seeking|looking\s+for)"
+
+_DESC_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
+    (
+        "internship",
+        (
+            re.compile(
+                r"\b(?:vaga|oportunidade|programa)\s+(?:de|para)\s+estagi(?:o|ari[oa])\b"
+                r"|\bbolsa[\s-]?auxilio\b|\bcursando\s+(?:o\s+)?(?:ensino\s+)?superior\b"
+                r"|\b(?:buscamos|procuramos|contratamos)\s+(?:um|uma)?\s*estagiari[oa]\b"
+                r"|\binternship\s+(?:position|role|program|opportunity)\b"
+                r"|\b(?:hiring|seeking|looking\s+for)\s+(?:an?\s+)?intern\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        "trainee",
+        (
+            re.compile(
+                r"\b(?:programa|vaga|oportunidade)\s+(?:de\s+)?trainee\b|\bgraduate\s+program\b|\btrainee\s+(?:program|position|role)\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        "entry_level",
+        (
+            re.compile(
+                rf"\b{_DESC_ROLE_PREFIX}\b[^.\n]{{0,45}}\b(?:junior|jr\.?(?!\w)|entry[\s-]?level)\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        "mid",
+        (
+            re.compile(
+                rf"\b{_DESC_ROLE_PREFIX}\b[^.\n]{{0,45}}\b(?:pleno|mid[\s-]?level|semi[\s-]?senior|ssr\.?(?!\w))\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        "senior",
+        (
+            re.compile(
+                rf"\b{_DESC_ROLE_PREFIX}\b[^.\n]{{0,45}}\b(?:senior|sr\.?(?!\w))\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        "tech_lead",
+        (
+            re.compile(
+                rf"\b{_DESC_ROLE_PREFIX}\b[^.\n]{{0,45}}\b(?:tech[\s-]?lead|techlead|technical\s+lead|lider\s+(?:tecnic[oa]|de\s+tecnologia))\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        "director",
+        (
+            re.compile(
+                rf"\b{_DESC_ROLE_PREFIX}\b[^.\n]{{0,45}}\b(?:diretor(?:a)?|director|head\s+(?:of|de))\b",
+                re.IGNORECASE,
+            ),
         ),
     ),
 )
@@ -927,6 +1011,18 @@ def detect_title_experience_levels(title: Optional[str]) -> set[str]:
     return detected
 
 
+def detect_description_experience_levels(description: Optional[str]) -> set[str]:
+    """Infer role-declaring experience buckets conservatively from a job description."""
+    if not description:
+        return set()
+    norm = _normalize_text(str(description))
+    detected: set[str] = set()
+    for level, patterns in _DESC_EXP_PATTERNS:
+        if any(pat.search(norm) for pat in patterns):
+            detected.add(level)
+    return detected
+
+
 def normalize_experience_targets(experience_level: Optional[Union[str, List[str]]]) -> set[str]:
     """Normalize selected experience filter tokens into semantic buckets."""
     if not experience_level:
@@ -950,33 +1046,40 @@ def normalize_experience_targets(experience_level: Optional[Union[str, List[str]
 
 
 def job_matches_experience(job: Dict[str, Any], experience_level: Optional[Union[str, List[str]]]) -> bool:
-    """Strictly verify if a job satisfies at least one selected experience level."""
+    """Verify whether a job matches selected experience levels via title, description, and metadata."""
     targets = normalize_experience_targets(experience_level)
     if not targets:
         return True
 
-    meta_code = job.get("experience_level_code")
-    if meta_code == "not_applicable":
+    title_levels = detect_title_experience_levels(job.get("title"))
+    if title_levels:
+        if title_levels & targets:
+            # Explicit title recognition overrides noisy or 'not_applicable' LinkedIn metadata.
+            return True
         return False
 
-    title_levels = detect_title_experience_levels(job.get("title"))
-    if title_levels and title_levels.isdisjoint(targets):
+    meta_code = job.get("experience_level_code")
+    desc_levels = detect_description_experience_levels(job.get("description"))
+    if desc_levels:
+        if desc_levels & targets:
+            if not meta_code or meta_code == "not_applicable":
+                return True
+            if meta_code in _META_TO_TARGETS:
+                return bool((_META_TO_TARGETS[meta_code] & targets) or (targets & _TITLE_REQUIRED_TARGETS))
+            return True
+        return False
+
+    if not meta_code or meta_code == "not_applicable":
         return False
 
     if targets <= _TITLE_REQUIRED_TARGETS:
-        if not (title_levels & targets):
-            return False
-        if meta_code and meta_code in _META_TO_TARGETS:
-            return bool(_META_TO_TARGETS[meta_code] & targets)
-        return True
+        return False
 
-    if meta_code and meta_code in _META_TO_TARGETS:
+    if meta_code in _META_TO_TARGETS:
         non_title_only_targets = targets - _TITLE_REQUIRED_TARGETS
-        return bool(_META_TO_TARGETS[meta_code] & non_title_only_targets) or (
-            bool(title_levels & targets) and bool(_META_TO_TARGETS[meta_code] & targets)
-        )
+        return bool(_META_TO_TARGETS[meta_code] & non_title_only_targets)
 
-    return bool(title_levels & targets)
+    return False
 
 
 def job_matches_work_mode(job: Dict[str, Any], work_mode: Optional[Union[str, List[str]]]) -> bool:
