@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from contextlib import closing
 import hashlib
 import os
 import re
@@ -126,6 +127,12 @@ def _strip_accents(text: str) -> str:
     return "".join(ch for ch in unicodedata.normalize("NFD", text) if unicodedata.category(ch) != "Mn")
 
 
+_LATIN_STOPWORDS_NORM: Dict[str, Set[str]] = {
+    lang: {_strip_accents(s) for s in sw_set}
+    for lang, sw_set in _LATIN_STOPWORDS.items()
+}
+
+
 def _active_db_path() -> Optional[str]:
     if _configured_db_path is not None:
         return _configured_db_path or None
@@ -171,7 +178,7 @@ def _sqlite_batch_get(tl: str, digests: List[str]) -> Dict[str, Tuple[str, Optio
     found: Dict[str, Tuple[str, Optional[str]]] = {}
     with _db_lock:
         try:
-            with sqlite3.connect(db_path, timeout=5.0) as conn:
+            with closing(sqlite3.connect(db_path, timeout=5.0)) as conn, conn:
                 _ensure_sqlite_schema(conn, db_path)
                 for idx in range(0, len(digests), 400):
                     chunk = digests[idx : idx + 400]
@@ -194,7 +201,7 @@ def _sqlite_batch_put(entries: List[Tuple[str, str, str, Optional[str]]]) -> Non
     now_ts = time.time()
     with _db_lock:
         try:
-            with sqlite3.connect(db_path, timeout=5.0) as conn:
+            with closing(sqlite3.connect(db_path, timeout=5.0)) as conn, conn:
                 _ensure_sqlite_schema(conn, db_path)
                 conn.executemany(
                     """
@@ -242,7 +249,7 @@ def clear_cache() -> None:
     if db_path and os.path.exists(db_path):
         with _db_lock:
             try:
-                with sqlite3.connect(db_path, timeout=5.0) as conn:
+                with closing(sqlite3.connect(db_path, timeout=5.0)) as conn, conn:
                     _ensure_sqlite_schema(conn, db_path)
                     conn.execute("DELETE FROM translations")
                     conn.commit()
@@ -448,8 +455,8 @@ def _score_latin_languages(text: str) -> Dict[str, int]:
     norm_lower = _strip_accents(lower)
     words = re.findall(r"[a-z]+", norm_lower)
     for w in words:
-        for lang_code, sw_set in _LATIN_STOPWORDS.items():
-            if w in {_strip_accents(s) for s in sw_set}:
+        for lang_code, sw_set in _LATIN_STOPWORDS_NORM.items():
+            if w in sw_set:
                 scores[lang_code] += 2
         for lang_code, kw_set in _LANG_JOB_KEYWORDS.items():
             if w in kw_set:
@@ -501,6 +508,7 @@ def detect_source_language(
 
 def _get_argos_translation(from_code: str, to_code: str) -> Optional[Any]:
     """Return a cached Argos Translate translator object (supporting automatic English pivot)."""
+    global _argos_languages_by_code
     if not from_code or not to_code or from_code == to_code:
         return None
     pair = (from_code, to_code)
@@ -518,7 +526,7 @@ def _get_argos_translation(from_code: str, to_code: str) -> Optional[Any]:
             return _argos_translators[pair]
         if _argos_languages_by_code is None:
             installed = argos_translate.get_installed_languages()
-            globals()["_argos_languages_by_code"] = {lang.code: lang for lang in installed}
+            _argos_languages_by_code = {lang.code: lang for lang in installed}
         lang_map = _argos_languages_by_code or {}
         from_lang = lang_map.get(from_code)
         to_lang = lang_map.get(to_code)
@@ -660,11 +668,22 @@ def _translate_single_job(item: Dict[str, Any], target_lang: str) -> Tuple[str, 
     job_id = str(item.get("id", ""))
     raw_title = item.get("title")
     raw_desc = item.get("description")
+    lang_key = normalize_target_lang(target_lang)
+    if not lang_key or lang_key not in TARGET_LANG_MAP:
+        return job_id, {
+            "title": raw_title,
+            "description": raw_desc,
+            "excerpt": raw_desc,
+            "source_lang": None,
+            "target_lang": target_lang,
+            "was_translated": False,
+            "is_full": True,
+        }
 
     combined_sample = " ".join(
         t for t in (raw_title, raw_desc) if isinstance(t, str) and t.strip()
     )
-    job_hint = detect_source_language(combined_sample, target_lang, strict=True)
+    job_hint = detect_source_language(combined_sample, lang_key, strict=True)
     text_hints: Dict[str, Optional[str]] = {}
     texts: List[str] = []
     for t in (raw_title, raw_desc):
@@ -672,7 +691,7 @@ def _translate_single_job(item: Dict[str, Any], target_lang: str) -> Tuple[str, 
             texts.append(t)
             text_hints[t] = job_hint
 
-    translated_map = _translate_texts_with_argos(texts, target_lang, text_hints=text_hints)
+    translated_map = _translate_texts_with_argos(texts, lang_key, text_hints=text_hints)
 
     title_out, title_src = (
         translated_map.get(raw_title, (raw_title, None)) if isinstance(raw_title, str) else (raw_title, None)
@@ -684,13 +703,13 @@ def _translate_single_job(item: Dict[str, Any], target_lang: str) -> Tuple[str, 
     changed = (isinstance(raw_title, str) and title_out != raw_title) or (
         isinstance(raw_desc, str) and desc_out != raw_desc
     )
-    was_translated = bool(source_lang and source_lang != target_lang and changed)
+    was_translated = bool(source_lang and source_lang != lang_key and changed)
     return job_id, {
         "title": title_out,
         "description": desc_out,
         "excerpt": desc_out,
         "source_lang": source_lang,
-        "target_lang": target_lang,
+        "target_lang": lang_key,
         "was_translated": was_translated,
         "is_full": True,
     }
