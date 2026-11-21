@@ -348,7 +348,7 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
       'emptyTabRecommendedTitle', 'emptyTabRecommendedDesc',
       'labelLimitJobs', 'limit25', 'limit50', 'limit75', 'limitUnlimited',
       'translatedFromTo',
-      'ariaMainNav', 'ariaFooter', 'ariaFooterNav', 'footerTagline', 'footerBackToTop', 'footerRights'
+      'ariaMainNav', 'ariaFooter', 'footerRights'
     ];
     for (const l of langs) {
       if ('labelEasyApply' in i18n[l]) {
@@ -622,10 +622,11 @@ def test_home_renders_minimalist_footer(client):
     assert 'class="navbar-nav"' in html
     assert 'class="navbar-controls"' in html
     assert '<footer class="site-footer"' in html
-    assert 'class="footer-nav"' in html
-    assert 'data-i18n="footerTagline"' in html
-    assert 'data-i18n="footerBackToTop"' in html
     assert 'data-i18n="footerRights"' in html
+    footer_start = html.index('<footer class="site-footer"')
+    footer_end = html.index("</footer>", footer_start)
+    footer_html = html[footer_start:footer_end]
+    assert "<a " not in footer_html
 
 
 
