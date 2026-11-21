@@ -46,9 +46,9 @@ http://localhost:5000
 
 - **Filtro de País Confiável (`geoId` + Pós-Validação):** Normaliza o país selecionado (ex.: `"Brasil"` → `"Brazil"` com `geoId=106057199` quando apenas o país é selecionado) e aplica validação pós-coleta garantindo que as vagas exibidas pertençam ao país filtrado.
 - **Localização em Cascata:** Selecione **País → Estado/Região → Cidade (opcional)** com sugestões automáticas para 8 países (`Brazil`, `Portugal`, `United States`, `Canada`, `United Kingdom`, `Germany`, `Spain`, `Ireland`). Os nomes dos países acompanham o idioma da interface enquanto estados e cidades permanecem no formato canônico.
-- **Filtros Avançados, Multisseleção e Limite de Vagas:** Suporte a **Data de publicação**, multisseleção para **Nível de experiência** (`Estágio`, `Júnior`, `Pleno`, `Sênior`, `Diretor`) e **Modalidade de trabalho** (`Remoto`, `Híbrido`, `Presencial`), **Ordenar por** (`Mais relevantes` / `Mais recentes` via `sortBy=R|DD`), **Limite de vagas** (`25` padrão, `50`, `75` ou `Sem restrição` com teto técnico seguro de `250`) e checkbox de **Candidatura Simplificada** (`easy_apply` → `f_AL=true`), além de **51 sugestões de cargos em TI** traduzidas nos 8 idiomas. No desktop (`1024px` e `1440px`), todos os filtros organizam-se em exatamente 2 fileiras.
+- **Filtros Avançados, Multisseleção e Limite de Vagas:** Suporte a **Data de publicação**, multisseleção com visual de `<select>` para **Nível de experiência** (`Estágio`, `Trainee`, `Júnior`, `Pleno`, `Sênior`, `Tech Lead`, `Diretor`) e **Modalidade de trabalho** (`Remoto`, `Híbrido`, `Presencial`), **Ordenar por** (`Mais relevantes` / `Mais recentes` via `sortBy=R|DD`), **Limite de vagas** alinhado na mesma linha (`25` padrão, `50`, `75` ou `Sem restrição` com teto técnico seguro de `250`) e **51 sugestões de cargos em TI** traduzidas nos 8 idiomas. No desktop (`1024px` e `1440px`), todos os filtros organizam-se em exatamente 2 fileiras.
 - **Validação Rigorosa Pós-Coleta em Duas Abas:** Analisa metadados e semântica de título/descrição para classificar todo o lote coletado em **Correspondentes** (atende estritamente localização, experiência e modalidade selecionadas) e **Talvez você goste** (demais vagas relacionadas retornadas pelo LinkedIn, incluindo `Não aplicável` ou níveis/modalidades distintos), evitando falsos positivos sem descartar oportunidades.
-- **Internacionalização (8 Idiomas) e Tradução de Cards:** Português (`pt`), Inglês (`en`), Espanhol (`es`), Francês (`fr`), Italiano (`it`), Alemão (`de`), Russo (`ru`) e Chinês (`zh`). Toda a interface (rótulos, países, abas, datas relativas, metadados estruturados, status, erros e sugestões) segue o idioma escolhido com `Accept-Language` dinâmico. Quando o usuário seleciona um idioma diferente de `pt`, o título e a descrição dos cards/modal são traduzidos automaticamente via `POST /translate` com cache LRU no backend, cache de sessão no navegador (`sessionStorage`) e fallback seguro para o texto original.
+- **Internacionalização (8 Idiomas) e Tradução Universal de Cards:** Português (`pt`), Inglês (`en`), Espanhol (`es`), Francês (`fr`), Italiano (`it`), Alemão (`de`), Russo (`ru`) e Chinês (`zh`). Toda a interface (rótulos, países, abas, datas relativas, metadados estruturados, status, erros e sugestões) segue o idioma escolhido com `Accept-Language` dinâmico. Os cards e modais têm título e descrição traduzidos automaticamente para o **idioma ativo da página (incluindo Português)** via `POST /translate` com cache LRU no servidor, cache de sessão (`sessionStorage`) e fallback seguro, exibindo o selo `Traduzido: Origem → Destino` quando o idioma original difere do idioma atual.
 - **Tema Claro/Escuro e Responsividade:** Alternância de tema persistida em `localStorage`, marcação de vagas já visualizadas (`huntly_seen_jobs`, até 300 IDs), paginação (9 cards por página), modal de detalhes e layout adaptado para `360px`, `768px`, `1024px` e `1440px`.
 - **Filtro Rápido, Exclusão de Termos e Exportação por Aba:** Filtragem instantânea para inclusão e campo negativo em tempo real para **excluir palavras-chave** na aba ativa (insensível a acentos, sobre textos originais e traduzidos), além de download em **CSV** (UTF-8 com BOM e proteção contra fórmula injection CWE-1236) ou **JSON** respeitando a aba ativa (`?tab=`).
 
@@ -69,7 +69,7 @@ huntly/
 ├── tests/              # Suíte de testes unitários (pytest)
 └── docs/
     ├── analise/        # Relatórios de auditoria (@auditor e @frontend) e prints de referência
-    └── decisoes/       # Registros de Decisão Arquitetural (ADRs 001 a 007)
+    └── decisoes/       # Registros de Decisão Arquitetural (ADRs 001 a 008)
 ```
 
 ## Rotas HTTP
@@ -77,12 +77,12 @@ huntly/
 | Método | Rota | Descrição |
 | --- | --- | --- |
 | `GET` | `/` | Renderiza a interface principal (`templates/index.html`). |
-| `POST` | `/search` | Valida parâmetros (`type`, `keywords`, `location`, `max_date`, `sort_by`, `easy_apply`, `job_type`, `work_mode`/`place`, `experience_level`, `limit_jobs` com teto `250`, `lang`), inicia uma nova execução isolada por `run_id` e retorna `message` / `message_code`. |
+| `POST` | `/search` | Valida parâmetros (`type`, `keywords`, `location`, `max_date`, `sort_by`, `job_type`, `work_mode`/`place`, `experience_level`, `limit_jobs` com teto `250`, `easy_apply`, `lang`), inicia uma nova execução isolada por `run_id` e retorna `message` / `message_code`. |
 | `POST` | `/stop` | Interrompe a busca ativa (`jobs_state.stop()`). |
 | `GET` | `/status` | Retorna o progresso e metadados de `SearchState` (`status`, `status_code`, `status_params`, `progress`, `collected_jobs`). Aceita `?include_results=0` para omitir a lista completa `results` durante o polling. |
 | `GET` | `/results` | Retorna as vagas coletadas; aceita opcionalmente `?tab=matched|recommended|all`, `?q=` e `?exclude=`. |
 | `GET` | `/job/<job_id>` | Retorna os detalhes de uma vaga específica presente nos resultados atuais (`404` se não encontrada). |
-| `POST` | `/translate` | Traduz sob demanda `title` e `description` de até 20 vagas (`lang` + `job_ids` ou `items`) com cache LRU no servidor e fallback seguro para o original. |
+| `POST` | `/translate` | Traduz sob demanda `title` e `description` de até 20 vagas para qualquer um dos 8 idiomas (`pt`, `en`, `es`, `fr`, `it`, `de`, `ru`, `zh`), retornando também `source_lang`, `target_lang` e `was_translated` com cache LRU e fallback seguro. |
 | `GET` | `/export/csv` | Exporta os resultados válidos em CSV (UTF-8 BOM), aceitando `?lang=`, `?tab=`, `?q=` e `?exclude=`. |
 | `GET` | `/export/json` | Exporta os resultados válidos em JSON, aceitando `?lang=`, `?tab=`, `?q=` e `?exclude=`. |
 

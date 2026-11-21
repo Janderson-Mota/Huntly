@@ -12,25 +12,26 @@ Mesmo após os avanços anteriores na filtragem de país e ordenação, identifi
 
 ## Decisão
 
-1. **Multisseleção compacta para Experiência e Modalidade (`templates/index.html`, `static/script.js`, `app.py`, `scraper.py`):**
-   - Substituídos `#experience_level` e `#place` por componentes dropdown `.multi-select` (`#experience-multiselect` e `#work-mode-multiselect`) com checkboxes clicáveis, resumo dinâmico no botão disparador, contador numérico quando `>= 2` itens estão selecionados e retorno ao estado neutro ("Todos") quando nada está marcado.
+1. **Multisseleção estilo `<select>` para Experiência (7 níveis) e Modalidade (`templates/index.html`, `static/styles.css`, `static/script.js`, `app.py`, `scraper.py`):**
+   - Substituídos `#experience_level` e `#place` por botões dropdown `.multi-select-trigger` (`height: 40px`, borda, tipografia e seta equivalentes aos `<select>` nativos estilizados com `appearance: none` + chevron SVG) que abrem menus flutuantes com checkboxes clicáveis, mantendo quando fechados o texto resumido das opções escolhidas (ex.: `"Todos os níveis"` ou `"Estágio, Júnior"`).
+   - O seletor **Nível de experiência** passou a oferecer **7 níveis/senioridades de TI**: `Estágio` (`"1"`), `Trainee` (`"trainee"` → `f_E=1,2`), `Júnior` (`"2"`), `Pleno` (`"3,4"`), `Sênior` (`"4"`), `Tech Lead` (`"tech_lead"` → `f_E=4`) e `Diretor` (`"5,6"`), com mapeamento automático para códigos numéricos `f_E` do LinkedIn via `_expand_experience_linkedin_codes()`.
+   - Removido completamente o checkbox `Candidatura Simplificada` (`#easy_apply` / `labelEasyApply`) da interface para simplificar o formulário mantendo suporte retrocompatível no backend.
    - Em `app.py`, adicionado `_parse_multi_filter()` aceitando listas JSON ou strings únicas/separadas por vírgula (preservando tokens compostos `"3,4"` e `"5,6"` e mantendo retrocompatibilidade para `work_mode` e `place`).
-   - Em `scraper.py`, `_flatten_filter_codes()` achata e deduplica códigos enviando parâmetros separados por vírgula ao LinkedIn (`f_E=1,2`, `f_WT=2,3`).
 
 2. **Validação pós-coleta rigorosa e separação em duas abas (`scraper.py`, `app.py`, `static/script.js`):**
    - Implementada classificação determinística `classify_job_match()` combinando três validadores estritos:
      - `job_matches_location()`: valida país (`job_matches_country`) e, quando informados, cidade ou estado/UF (`STATE_ALIASES`).
-     - `job_matches_experience()`: valida metadado estruturado (`experience_level_code`) em conjunto com análise semântica multilíngue do título (`detect_title_experience_levels()`), enviando para a segunda aba falsos positivos como `"Senior Developer"`, `"Tech Lead"` ou metadado `"not_applicable"`.
+     - `job_matches_experience()`: valida metadado estruturado (`experience_level_code`) em conjunto com análise semântica multilíngue do título (`detect_title_experience_levels()`), distinguindo `Estágio`, `Trainee`, `Júnior`, `Pleno`, `Sênior`, `Tech Lead` e `Diretor` (exigindo evidência de título para `Trainee` e `Tech Lead`) e enviando divergências ou `"not_applicable"` para a segunda aba.
      - `job_matches_work_mode()`: detecta modalidade (`remote`, `hybrid`, `onsite`) com prioridade para termos híbridos e ignorando negações explícitas (ex.: `"não é remoto"`), via critérios HTML ou texto da vaga (`detect_work_mode()`).
    - Cada vaga coletada recebe `match_category`:
      - **Aba 1 (`"Correspondentes"`, `match_category == "matched"`, ativa por padrão):** exibe exclusivamente vagas que atendem estritamente localização, experiência e modalidade selecionadas.
      - **Aba 2 (`"Talvez você goste"`, `match_category == "recommended"`):** preserva as demais vagas relevantes coletadas na busca (outros níveis/modalidades, `"Não aplicável"`, etc.) sem descartar conteúdo potencialmente útil.
    - Barra de filtro rápido (`#quick-filter-input`), exclusão negativa (`#exclude-filter-input`), paginação e exportação (`/results`, `/export/csv`, `/export/json` via `?tab=`, `?q=`, `?exclude=`) operam respeitando a aba ativa e mantendo compatibilidade quando `tab` não é informado.
 
-3. **Seletor "Limite de vagas" com teto técnico seguro (`250`) e grid de 2 fileiras no desktop:**
+3. **Seletor "Limite de vagas" alinhado com teto técnico seguro (`250`) e grid de 2 fileiras no desktop:**
    - Adicionado `#limit_jobs` com opções `25` (padrão), `50`, `75` e `"Sem restrição"` (`value="unlimited"`).
    - No backend (`app.py` e `scraper.py`), `"unlimited"` ou `0` são convertidos em `UNLIMITED_JOBS_CAP = 250`, protegendo a VPS contra rate limits e timeouts sem alterar a classificação das duas abas sobre todo o lote coletado.
-   - Em `static/styles.css`, ajustado o grid para manter exatamente **2 fileiras** em `1024px` e `1440px` (`primary-inputs-grid` na Fileira 1 e `.filters-grid` com `repeat(5, minmax(0, 1fr))` na Fileira 2, rótulos compactos com `.form-group > label` e `@media (max-width: 1120px)` sem colapsar para 3ª fileira; colapso reservado para `<= 960px` e `<= 640px`).
+   - Em `static/styles.css`, ajustado o grid para manter exatamente **2 fileiras** em `1024px` e `1440px` (`primary-inputs-grid` na Fileira 1 e `.filters-grid` com `repeat(5, minmax(0, 1fr))` e `align-items: end` na Fileira 2, rótulos `.form-group > label` com `min-height: 1rem` e `@media (max-width: 1120px)` sem colapsar para 3ª fileira; colapso reservado para `<= 960px` e `<= 640px`), mantendo `#limit_jobs` perfeitamente alinhado aos demais campos em linha e altura (`40px`).
 
 4. **Internacionalização e cobertura de testes:**
    - Todos os novos rótulos, opções, `aria-label`, mensagens de abas e limites traduzidos nos 8 idiomas (`pt`, `en`, `es`, `fr`, `it`, `de`, `ru`, `zh`).
