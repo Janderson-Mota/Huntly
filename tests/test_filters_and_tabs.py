@@ -134,6 +134,42 @@ def test_build_params_encodes_multiselect_comma_separated_and_deduped():
     assert "f_E=3%2C4" in qs_str or "f_E=3,4" in qs_str
     assert "f_WT=2%2C3" in qs_str or "f_WT=2,3" in qs_str
 
+    qs_semantic = build_params(
+        keywords="python",
+        location="Brazil",
+        time_range="",
+        distance="",
+        job_type=[],
+        place=[],
+        experience_level=["trainee", "tech_lead", "5,6"],
+    )
+    assert "f_E=1%2C2%2C4%2C5%2C6" in qs_semantic or "f_E=1,2,4,5,6" in qs_semantic
+    assert "tech_lead" not in qs_semantic
+    assert "trainee" not in qs_semantic
+
+
+def test_expanded_it_seniority_levels_post_validation():
+    intern_job = {"title": "Estágio em Python", "experience_level_code": "internship"}
+    trainee_job = {"title": "Programa Trainee em Engenharia", "experience_level_code": "internship"}
+    junior_job = {"title": "Desenvolvedor Python Júnior", "experience_level_code": "entry_level"}
+    pleno_job = {"title": "Engenheiro de Software Pleno", "experience_level_code": "mid_senior"}
+    senior_job = {"title": "Senior Backend Engineer", "experience_level_code": "mid_senior"}
+    tech_lead_job = {"title": "Tech Lead Python", "experience_level_code": "mid_senior"}
+    director_job = {"title": "Diretor de Tecnologia", "experience_level_code": "director"}
+    generic_mid_senior = {"title": "Desenvolvedor Python", "experience_level_code": "mid_senior"}
+
+    assert job_matches_experience(intern_job, ["1"]) is True
+    assert job_matches_experience(trainee_job, ["trainee"]) is True
+    assert job_matches_experience(intern_job, ["trainee"]) is False
+    assert job_matches_experience(junior_job, ["2"]) is True
+    assert job_matches_experience(pleno_job, ["3,4"]) is True
+    assert job_matches_experience(senior_job, ["4"]) is True
+    assert job_matches_experience(tech_lead_job, ["4"]) is False
+    assert job_matches_experience(tech_lead_job, ["tech_lead"]) is True
+    assert job_matches_experience(senior_job, ["tech_lead"]) is False
+    assert job_matches_experience(generic_mid_senior, ["tech_lead"]) is False
+    assert job_matches_experience(director_job, ["5,6"]) is True
+
 
 def test_post_validation_experience_and_work_mode_classification():
     # Estágio ["1"]: aceita estágio, rejeita Pleno-sênior / Não aplicável / título Senior
@@ -290,6 +326,11 @@ def test_results_and_export_respect_active_tab_and_filters(client):
 
 
 def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
+    with open("templates/index.html", encoding="utf-8") as fh:
+        html = fh.read()
+    assert html.count('<input type="checkbox" name="experience_level"') == 7
+    assert 'id="easy_apply"' not in html
+
     js_check = r"""
     const fs = require('fs');
     const vm = require('vm');
@@ -300,12 +341,18 @@ def test_i18n_8_langs_parity_with_new_multiselect_tabs_and_limit_keys():
     const langs = Object.keys(i18n);
     const refKeys = Object.keys(i18n.pt).sort();
     const required = [
+      'expIntern', 'expTrainee', 'expJunior', 'expMid', 'expSenior', 'expTechLead', 'expDirector',
       'ariaExperienceMulti', 'ariaWorkModeMulti',
       'ariaResultsTabs', 'tabMatched', 'tabRecommended',
       'emptyTabMatchedTitle', 'emptyTabMatchedDesc',
       'emptyTabRecommendedTitle', 'emptyTabRecommendedDesc',
       'labelLimitJobs', 'limit25', 'limit50', 'limit75', 'limitUnlimited'
     ];
+    for (const l of langs) {
+      if ('labelEasyApply' in i18n[l]) {
+        throw new Error('Obsolete labelEasyApply present in ' + l);
+      }
+    }
     const errors = [];
     for (const l of langs) {
       const k = Object.keys(i18n[l]).sort();

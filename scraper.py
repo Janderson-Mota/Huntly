@@ -299,25 +299,42 @@ STATE_ALIASES: Dict[str, Tuple[str, ...]] = {
     "seville": ("seville", "sevilla", "sevilha"),
 }
 
+_EXP_TOKEN_TO_LINKEDIN_FE: Dict[str, Tuple[str, ...]] = {
+    "1": ("1",),
+    "trainee": ("1", "2"),
+    "2": ("2",),
+    "3": ("3",),
+    "3,4": ("3", "4"),
+    "4": ("4",),
+    "tech_lead": ("4",),
+    "5": ("5",),
+    "6": ("6",),
+    "5,6": ("5", "6"),
+}
+
 _EXP_TOKEN_TO_TARGETS: Dict[str, Tuple[str, ...]] = {
     "1": ("internship",),
+    "trainee": ("trainee",),
     "2": ("entry_level",),
     "3": ("mid",),
     "3,4": ("mid",),
     "4": ("senior",),
+    "tech_lead": ("tech_lead",),
     "5": ("director",),
     "6": ("director",),
     "5,6": ("director",),
 }
 
 _META_TO_TARGETS: Dict[str, set[str]] = {
-    "internship": {"internship"},
-    "entry_level": {"entry_level"},
-    "associate": {"mid"},
-    "mid_senior": {"mid", "senior"},
+    "internship": {"internship", "trainee"},
+    "entry_level": {"entry_level", "trainee"},
+    "associate": {"mid", "trainee"},
+    "mid_senior": {"mid", "senior", "tech_lead"},
     "director": {"director"},
     "executive": {"director"},
 }
+
+_TITLE_REQUIRED_TARGETS: set[str] = {"trainee", "tech_lead"}
 
 _NEGATED_WORK_MODE_RE = re.compile(
     r"\b(?:nao\s+e|nao\s+sera|not|no\s+es|non\s+e|pas)\s+(?:100%\s+)?(?:remot[oae]|h[ií]brid[oa]|hybrid|presencial|on[\s-]?site|remote)\b",
@@ -339,14 +356,20 @@ _TITLE_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
     (
         "internship",
         (
-            re.compile(r"\bestagi(?:o|ari[oa])\b|\bintern(?:ship)?\b|\bpracticas\b|\bbecari[oa]\b|\btirocinio\b|\bpraktikum\b|\bpraktikant(?:in)?\b|\btrainee\b", re.IGNORECASE),
+            re.compile(r"\bestagi(?:o|ari[oa])\b|\bintern(?:ship)?\b|\bpracticas\b|\bbecari[oa]\b|\btirocinio\b|\bpraktikum\b|\bpraktikant(?:in)?\b", re.IGNORECASE),
             re.compile(r"\bstagiaire\b|\bstage\s+(?:de|en|em|it|ti|dev|data|tech|software)\b|^\s*stage\b|\(\s*stage\s*\)", re.IGNORECASE),
+        ),
+    ),
+    (
+        "trainee",
+        (
+            re.compile(r"\btrainee\b|\bgraduate\s+program\b|\bprograma\s+(?:de\s+)?trainee\b", re.IGNORECASE),
         ),
     ),
     (
         "entry_level",
         (
-            re.compile(r"\bjunior\b|\bjr\.?(?!\w)|\bentry[\s-]?level\b|\bgraduate\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+i\b|\bnivel\s+i\b|\blevel\s+1\b", re.IGNORECASE),
+            re.compile(r"\bjunior\b|\bjr\.?(?!\w)|\bentry[\s-]?level\b|\bgraduate\b(?!\s+program)|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+i\b|\bnivel\s+i\b|\blevel\s+1\b", re.IGNORECASE),
         ),
     ),
     (
@@ -358,22 +381,30 @@ _TITLE_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
     (
         "senior",
         (
-            re.compile(r"\bsenior\b|\bsr\.?(?!\w)|\bstaff\b|\bprincipal\b|\btech\s+lead\b|\bteam\s+lead\b|\blead\s+(?:engineer|developer|architect|analyst|designer|scientist|qa|sre|devops)\b|\b(?:engineering|software|backend|frontend|data|qa|devops|cloud|product)\s+lead\b|\barquitet[oa]\b|\barchitect\b|\bespecialista\b|\bspecialist\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+iii\b|\bnivel\s+iii\b|\blevel\s+3\b", re.IGNORECASE),
+            re.compile(r"\bsenior\b|\bsr\.?(?!\w)|\bespecialista\b|\bspecialist\b|\bstaff\b|\bprincipal\b|\barquitet[oa]\b|\barchitect\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+iii\b|\bnivel\s+iii\b|\blevel\s+3\b", re.IGNORECASE),
+        ),
+    ),
+    (
+        "tech_lead",
+        (
+            re.compile(r"\btech\s+lead\b|\bteam\s+lead\b|\blider\s+tecnic[oa]\b|\bengineering\s+lead\b|\blead\s+(?:engineer|developer|architect|analyst|designer|scientist|qa|sre|devops)\b|\b(?:software|backend|frontend|full\s*stack|mobile|data|qa|devops|cloud|platform|security)\s+lead\b", re.IGNORECASE),
         ),
     ),
     (
         "director",
         (
-            re.compile(r"\bdiretor(?:a)?\b|\bdirector\b|\bdirettore\b|\bdirektor\b|\bdirecteur\b|\bhead\s+of\b|\bvp\b|\bvice\s+president\b|\bchief\b|\bcto\b|\bcio\b|\bciso\b|\bcpo\b|\bceo\b|\bcfo\b|\bexecutiv[oa]\b|\bexecutive\b|\bengineering\s+manager\b", re.IGNORECASE),
+            re.compile(r"\bdiretor(?:a)?\b|\bdirector\b|\bdirettore\b|\bdirektor\b|\bdirecteur\b|\bhead\s+of\b|\bhead\s+de\b|\bvp\b|\bvice\s+president\b|\bchief\b|\bcto\b|\bcio\b|\bciso\b|\bcpo\b|\bceo\b|\bcfo\b|\bexecutiv[oa]\b|\bexecutive\b|\bengineering\s+manager\b", re.IGNORECASE),
         ),
     ),
 )
 
 _TITLE_EXP_NON_LATIN: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("internship", ("стажировк", "стажер", "стажёр", "实习")),
+    ("trainee", ("стажер-программа", "管培生")),
     ("entry_level", ("начальн", "младш", "初级")),
     ("mid", ("средн", "中级")),
-    ("senior", ("старш", "ведущ", "高级", "资深")),
+    ("senior", ("старш", "архитектор", "ведущ", "高级", "资深", "架构师", "专家")),
+    ("tech_lead", ("тимлид", "техлид", "技术负责人")),
     ("director", ("директор", "руководител", "总监", "高管")),
 )
 
@@ -883,11 +914,21 @@ def job_matches_experience(job: Dict[str, Any], experience_level: Optional[Union
         return False
 
     title_levels = detect_title_experience_levels(job.get("title"))
-    if title_levels and not (title_levels & targets):
+    if title_levels and title_levels.isdisjoint(targets):
         return False
 
+    if targets <= _TITLE_REQUIRED_TARGETS:
+        if not (title_levels & targets):
+            return False
+        if meta_code and meta_code in _META_TO_TARGETS:
+            return bool(_META_TO_TARGETS[meta_code] & targets)
+        return True
+
     if meta_code and meta_code in _META_TO_TARGETS:
-        return bool(_META_TO_TARGETS[meta_code] & targets)
+        non_title_only_targets = targets - _TITLE_REQUIRED_TARGETS
+        return bool(_META_TO_TARGETS[meta_code] & non_title_only_targets) or (
+            bool(title_levels & targets) and bool(_META_TO_TARGETS[meta_code] & targets)
+        )
 
     return bool(title_levels & targets)
 
@@ -1005,6 +1046,39 @@ def _flatten_filter_codes(values: Optional[Union[str, List[str]]]) -> List[str]:
     return codes
 
 
+def _expand_experience_linkedin_codes(values: Optional[Union[str, List[str]]]) -> List[str]:
+    """Translate semantic and numeric experience filter tokens into unique LinkedIn f_E numeric codes."""
+    if not values:
+        return []
+    raw_items = [values] if isinstance(values, str) else list(values)
+    seen: set[str] = set()
+    codes: List[str] = []
+
+    def add_code(code: str) -> None:
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+
+    for item in raw_items:
+        if item is None:
+            continue
+        raw = str(item).strip()
+        if not raw:
+            continue
+        if raw in _EXP_TOKEN_TO_LINKEDIN_FE:
+            for fe_code in _EXP_TOKEN_TO_LINKEDIN_FE[raw]:
+                add_code(fe_code)
+            continue
+        for part in raw.split(","):
+            tok = part.strip()
+            if not tok:
+                continue
+            for fe_code in _EXP_TOKEN_TO_LINKEDIN_FE.get(tok, (tok,)):
+                if fe_code.isdigit():
+                    add_code(fe_code)
+    return codes
+
+
 def build_params(
     keywords: str,
     location: str,
@@ -1053,7 +1127,7 @@ def build_params(
     place_codes = _flatten_filter_codes(work_mode if work_mode is not None else place)
     if place_codes:
         params.append(("f_WT", ",".join(place_codes)))
-    exp_codes = _flatten_filter_codes(experience_level)
+    exp_codes = _expand_experience_linkedin_codes(experience_level)
     if exp_codes:
         params.append(("f_E", ",".join(exp_codes)))
     if easy_apply:

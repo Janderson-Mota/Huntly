@@ -32,7 +32,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const navbarResultsCount = document.getElementById("navbar-results-count");
   const quickFilterInput = document.getElementById("quick-filter-input");
   const excludeFilterInput = document.getElementById("exclude-filter-input");
-  const easyApplyCheckbox = document.getElementById("easy_apply");
   const exportButtons = document.querySelectorAll(".export-btn");
 
   const jobModal = document.getElementById("job-modal");
@@ -425,17 +424,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateMultiSelectDisplay(container) {
     if (!container) return;
+    const trigger = container.querySelector(".multi-select-trigger");
     const labelEl = container.querySelector(".multi-select-label");
-    const countEl = container.querySelector(".multi-select-count");
     const defaultKey = container.dataset.defaultKey || "";
     const checked = Array.from(container.querySelectorAll('input[type="checkbox"]:checked'));
 
     if (checked.length === 0) {
-      if (labelEl) labelEl.textContent = defaultKey ? t(defaultKey) : "";
-      if (countEl) {
-        countEl.textContent = "";
-        countEl.style.display = "none";
-      }
+      const defText = defaultKey ? t(defaultKey) : "";
+      if (labelEl) labelEl.textContent = defText;
+      if (trigger) trigger.title = defText;
       return;
     }
 
@@ -443,16 +440,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const span = cb.closest(".multi-select-option")?.querySelector("span");
       return span ? span.textContent.trim() : cb.value;
     });
-    if (labelEl) labelEl.textContent = labels.join(", ");
-    if (countEl) {
-      if (checked.length >= 2) {
-        countEl.textContent = String(checked.length);
-        countEl.style.display = "inline-flex";
-      } else {
-        countEl.textContent = "";
-        countEl.style.display = "none";
-      }
-    }
+    const summary = labels.join(", ");
+    if (labelEl) labelEl.textContent = summary;
+    if (trigger) trigger.title = summary;
   }
 
   function updateAllMultiSelects() {
@@ -637,7 +627,7 @@ document.addEventListener("DOMContentLoaded", () => {
       work_mode: workModes,
       place: workModes,
       experience_level: experienceLevels,
-      easy_apply: Boolean(easyApplyCheckbox && easyApplyCheckbox.checked),
+      easy_apply: false,
       limit_jobs: rawLimit === "unlimited" ? "unlimited" : Number(rawLimit) || 25,
     };
   }

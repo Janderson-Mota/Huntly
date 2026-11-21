@@ -101,13 +101,16 @@
                   aria-haspopup="listbox" aria-expanded="false"
                   aria-label="Selecionar níveis de experiência" data-i18n-aria-label="ariaExperienceMulti">
                   <span class="multi-select-label" data-i18n="expAll">Todos os níveis</span>
-                  <span class="multi-select-count" style="display: none"></span>
                   <i class="bi bi-chevron-down multi-select-caret"></i>
                 </button>
                 <div class="multi-select-menu" role="group" aria-label="Nível de experiência" data-i18n-aria-label="labelExperience">
                   <label class="multi-select-option">
                     <input type="checkbox" name="experience_level" value="1" />
                     <span data-i18n="expIntern">Estágio</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="experience_level" value="trainee" />
+                    <span data-i18n="expTrainee">Trainee</span>
                   </label>
                   <label class="multi-select-option">
                     <input type="checkbox" name="experience_level" value="2" />
@@ -120,6 +123,10 @@
                   <label class="multi-select-option">
                     <input type="checkbox" name="experience_level" value="4" />
                     <span data-i18n="expSenior">Sênior</span>
+                  </label>
+                  <label class="multi-select-option">
+                    <input type="checkbox" name="experience_level" value="tech_lead" />
+                    <span data-i18n="expTechLead">Tech Lead</span>
                   </label>
                   <label class="multi-select-option">
                     <input type="checkbox" name="experience_level" value="5,6" />
@@ -136,7 +143,6 @@
                   aria-haspopup="listbox" aria-expanded="false"
                   aria-label="Selecionar modalidades de trabalho" data-i18n-aria-label="ariaWorkModeMulti">
                   <span class="multi-select-label" data-i18n="placeAll">Todas as modalidades</span>
-                  <span class="multi-select-count" style="display: none"></span>
                   <i class="bi bi-chevron-down multi-select-caret"></i>
                 </button>
                 <div class="multi-select-menu" role="group" aria-label="Modalidade de trabalho" data-i18n-aria-label="labelPlace">
@@ -178,12 +184,6 @@
 
         <!-- Ações Principais -->
         <div class="form-actions">
-          <label class="easy-apply-toggle" for="easy_apply">
-            <input type="checkbox" id="easy_apply" name="easy_apply" />
-            <i class="bi bi-lightning-charge"></i>
-            <span data-i18n="labelEasyApply">Candidatura Simplificada</span>
-          </label>
-
           <div class="form-actions-buttons">
             <button type="button" class="btn btn-outline" id="reset-filters-btn">
               <i class="bi bi-arrow-counterclockwise"></i>
