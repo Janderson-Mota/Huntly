@@ -945,6 +945,149 @@ def test_translate_single_batch_up_to_50_and_mymemory_fallback_on_429(client):
         assert mm_calls == []
 
 
+def test_translate_all_supported_languages_and_code_normalization(client):
+    import translator
+
+    translator.clear_cache()
+    jobs_state.set_results(
+        [{"id": "1100", "title": "Senior Backend Engineer", "description": "Remote role"}]
+    )
+
+    seen_tl = []
+
+    class MultiLangResp:
+        def __init__(self, tl, text):
+            self.tl = tl
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [[[f"[{self.tl}] {self.text}", self.text]], None, "en"]
+
+    def fake_post(url, params=None, data=None, headers=None, timeout=8):
+        seen_tl.append(params["tl"])
+        return MultiLangResp(params["tl"], data["q"])
+
+    expected_map = [
+        ("pt", "pt"),
+        ("en", "en"),
+        ("es", "es"),
+        ("fr", "fr"),
+        ("it", "it"),
+        ("de", "de"),
+        ("ru", "ru"),
+        ("zh", "zh-CN"),
+        ("zh-CN", "zh-CN"),
+        ("ja", "ja"),
+        ("pt-BR", "pt"),
+    ]
+
+    with patch("translator.requests.post", side_effect=fake_post):
+        for req_code, expected_tl in expected_map:
+            seen_tl.clear()
+            translator.clear_cache()
+            res = client.post("/translate", json={"lang": req_code, "mode": "preview", "job_ids": ["1100"]})
+            assert res.status_code == 200, f"Failed for {req_code}: {res.get_json()}"
+            payload = res.get_json()
+            assert seen_tl == [expected_tl, expected_tl]
+            assert payload["translations"]["1100"]["title"] == f"[{expected_tl}] Senior Backend Engineer"
+            assert payload["translations"]["1100"]["description"] == f"[{expected_tl}] Remote role"
+
+    invalid = client.post("/translate", json={"lang": "xx-invalid", "job_ids": ["1100"]})
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error_code"] == "errInvalidLanguage"
+
+
+def test_translate_parallel_workers_speed_and_sqlite_persistent_cache(tmp_path, client):
+    import translator
+
+    db_file = str(tmp_path / "test_translation_cache.sqlite3")
+    translator.configure_cache_db(db_file)
+    try:
+        translator.clear_cache()
+        jobs = [
+            {
+                "id": str(1200 + idx),
+                "title": f"Role Title {idx}",
+                "description": f"Role Description {idx}",
+            }
+            for idx in range(20)
+        ]
+        jobs_state.set_results(jobs)
+        calls = []
+
+        class TimedResp:
+            def __init__(self, text):
+                self.text = text
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return [[[f"[DE] {self.text}", self.text]], None, "en"]
+
+        def fake_post(url, params=None, data=None, headers=None, timeout=8):
+            calls.append(data["q"])
+            time.sleep(0.06)
+            return TimedResp(data["q"])
+
+        # 40 unique texts * 0.06s sequential = 2.4s; with 10 parallel workers <= ~0.24s + overhead
+        t0 = time.perf_counter()
+        with patch("translator.requests.post", side_effect=fake_post):
+            res = client.post(
+                "/translate",
+                json={"lang": "de", "mode": "preview", "job_ids": [j["id"] for j in jobs]},
+            )
+        elapsed = time.perf_counter() - t0
+        assert res.status_code == 200
+        assert len(calls) == 40
+        assert elapsed < 1.0, f"Expected parallel speedup (< 1.0s), got {elapsed:.2f}s"
+        data = res.get_json()
+        assert data["translations"]["1200"]["title"] == "[DE] Role Title 0"
+        assert data["translations"]["1219"]["description"] == "[DE] Role Description 19"
+
+        # Evict RAM cache while preserving SQLite DB: reload must hit SQLite with 0 HTTP calls
+        translator.clear_memory_cache()
+        assert translator.cache_size() == 0
+        calls.clear()
+        with patch("translator.requests.post", side_effect=fake_post):
+            res_sqlite = client.post(
+                "/translate",
+                json={"lang": "de", "mode": "preview", "job_ids": [j["id"] for j in jobs]},
+            )
+        assert res_sqlite.status_code == 200
+        assert res_sqlite.get_json() == data
+        assert calls == []
+    finally:
+        translator.clear_cache()
+        translator.configure_cache_db(None)
+
+
+def test_translate_packed_blocks_helper_and_fallback():
+    import translator
+
+    texts = ["Senior Backend Engineer", "Frontend React Developer", "Tech Lead PHP"]
+    packed_reply = (
+        "[[[HUNTLY_SEP_0]]]\nEngenheiro Backend Sênior\n"
+        "[[[HUNTLY_SEP_1]]]\nDesenvolvedor React Frontend\n"
+        "[[[HUNTLY_SEP_2]]]\nLíder Técnico PHP"
+    )
+    with patch("translator._request_google_chunk", return_value=(packed_reply, "en")) as mock_chunk:
+        out = translator._translate_google_packed_blocks(texts, "pt")
+        assert mock_chunk.call_count == 1
+        assert out["Senior Backend Engineer"] == ("Engenheiro Backend Sênior", "en")
+        assert out["Frontend React Developer"] == ("Desenvolvedor React Frontend", "en")
+        assert out["Tech Lead PHP"] == ("Líder Técnico PHP", "en")
+
+    # Corrupted delimiter count returns empty dict so caller falls back to per-item parallel requests
+    with patch("translator._request_google_chunk", return_value=("broken reply without markers", "en")):
+        out_bad = translator._translate_google_packed_blocks(texts, "pt")
+        assert out_bad == {}
+
+
+
 
 
 

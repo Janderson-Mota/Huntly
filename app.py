@@ -10,7 +10,7 @@ import unicodedata
 from flask import Flask, Response, jsonify, render_template, request
 
 from scraper import jobs_state, search_jobs_thread
-from translator import SUPPORTED_LANGS, translate_jobs_batch
+from translator import SUPPORTED_LANGS, normalize_target_lang, translate_jobs_batch
 
 app = Flask(__name__)
 _debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
@@ -338,8 +338,8 @@ def translate_job_cards():
         if not isinstance(params, dict):
             return jsonify({"error": "Payload JSON deve ser um objeto.", "error_code": "errInvalidPayload"}), 400
 
-        lang = _parse_str(params.get("lang"), max_len=10).lower()
-        if lang not in SUPPORTED_LANGS:
+        lang = normalize_target_lang(_parse_str(params.get("lang"), max_len=16))
+        if not lang:
             return jsonify({"error": "Idioma não suportado.", "error_code": "errInvalidLanguage"}), 400
 
         raw_mode = _parse_str(params.get("mode"), max_len=16).lower() or "full"

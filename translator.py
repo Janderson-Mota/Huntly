@@ -2,10 +2,10 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import html
-import json
 import os
 import queue
 import re
+import sqlite3
 import tempfile
 import threading
 import time
@@ -25,26 +25,33 @@ TARGET_LANG_MAP: Dict[str, str] = {
     "de": "de",
     "ru": "ru",
     "zh": "zh-CN",
+    "ja": "ja",
 }
 
 SUPPORTED_LANGS = set(TARGET_LANG_MAP.keys())
 
 TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
 MYMEMORY_URL = "https://api.mymemory.translated.net/get"
-MAX_CACHE_ENTRIES = 2000
+MAX_CACHE_ENTRIES = 5000
 MAX_CHUNK_CHARS = 4500
 MYMEMORY_MAX_CHARS = 450
+PACKED_BLOCK_MAX_CHARS = 3600
+PACKED_BLOCK_MAX_ITEMS = 12
 PREVIEW_DESC_CHARS = 450
 MAX_BATCH_ITEMS = 50
-TRANSLATE_WORKERS = 4
+TRANSLATE_WORKERS = 10
 GOOGLE_COOLDOWN_SECONDS = 300.0
-_CACHE_FILE = os.path.join(tempfile.gettempdir(), "huntly_translation_cache_v1.json")
+_DEFAULT_CACHE_DB = os.path.join(tempfile.gettempdir(), "huntly_translation_cache.sqlite3")
 
 _ORIGINAL_REQUESTS_POST = requests.post
 _ORIGINAL_REQUESTS_GET = requests.get
-_session_pool: "queue.LifoQueue[requests.Session]" = queue.LifoQueue(maxsize=16)
+_session_pool: "queue.LifoQueue[requests.Session]" = queue.LifoQueue(maxsize=24)
 _google_lock = threading.Lock()
 _google_cooldown_until = 0.0
+_db_lock = threading.Lock()
+_configured_db_path: Optional[str] = None
+_initialized_dbs: Set[str] = set()
+_PACK_SEP_RE = re.compile(r"\[\[\[\s*HUNTLY_SEP_(\d+)\s*\]\]\]")
 
 _LATIN_STOPWORDS: Dict[str, Set[str]] = {
     "pt": {
@@ -129,79 +136,143 @@ _cache: "OrderedDict[Tuple[str, str], Tuple[str, Optional[str]]]" = OrderedDict(
 _cache_lock = threading.Lock()
 
 
-def _disk_cache_enabled() -> bool:
-    return "PYTEST_CURRENT_TEST" not in os.environ
+def _active_db_path() -> Optional[str]:
+    if _configured_db_path is not None:
+        return _configured_db_path or None
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return None
+    return _DEFAULT_CACHE_DB
 
 
-def _load_disk_cache() -> None:
-    if not _disk_cache_enabled() or not os.path.exists(_CACHE_FILE):
+def configure_cache_db(path: Optional[str]) -> None:
+    """Configure an explicit SQLite cache database path (or None to revert to default behavior)."""
+    global _configured_db_path
+    with _db_lock:
+        _configured_db_path = path
+        if path:
+            _initialized_dbs.discard(path)
+
+
+def _ensure_sqlite_schema(conn: sqlite3.Connection, db_path: str) -> None:
+    if db_path in _initialized_dbs:
         return
-    try:
-        with open(_CACHE_FILE, "r", encoding="utf-8") as fh:
-            raw_entries = json.load(fh)
-        if not isinstance(raw_entries, list):
-            return
-        with _cache_lock:
-            for item in raw_entries[-MAX_CACHE_ENTRIES:]:
-                if (
-                    isinstance(item, list)
-                    and len(item) == 4
-                    and isinstance(item[0], str)
-                    and isinstance(item[1], str)
-                    and isinstance(item[2], str)
-                ):
-                    key = (item[0], item[1])
-                    _cache[key] = (item[2], item[3] if isinstance(item[3], str) else None)
-            while len(_cache) > MAX_CACHE_ENTRIES:
-                _cache.popitem(last=False)
-    except Exception:
-        # Ignore missing or corrupt cache files
-        return
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS translations (
+            tl TEXT NOT NULL,
+            digest TEXT NOT NULL,
+            translated TEXT NOT NULL,
+            source_lang TEXT,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (tl, digest)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_translations_updated ON translations (updated_at)")
+    conn.commit()
+    _initialized_dbs.add(db_path)
 
 
-def _save_disk_cache() -> None:
-    if not _disk_cache_enabled():
-        return
-    try:
-        with _cache_lock:
-            snapshot = [
-                [tl, digest, translated, src_lang]
-                for (tl, digest), (translated, src_lang) in _cache.items()
-            ]
-        fd, tmp_path = tempfile.mkstemp(prefix="huntly_cache_", suffix=".tmp", dir=tempfile.gettempdir())
+def _sqlite_batch_get(tl: str, digests: List[str]) -> Dict[str, Tuple[str, Optional[str]]]:
+    db_path = _active_db_path()
+    if not db_path or not digests:
+        return {}
+    found: Dict[str, Tuple[str, Optional[str]]] = {}
+    with _db_lock:
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(snapshot, fh, ensure_ascii=False)
-            os.replace(tmp_path, _CACHE_FILE)
+            with sqlite3.connect(db_path, timeout=5.0) as conn:
+                _ensure_sqlite_schema(conn, db_path)
+                for idx in range(0, len(digests), 400):
+                    chunk = digests[idx : idx + 400]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(
+                        f"SELECT digest, translated, source_lang FROM translations WHERE tl = ? AND digest IN ({placeholders})",
+                        [tl, *chunk],
+                    ).fetchall()
+                    for dig, translated, src_lang in rows:
+                        found[dig] = (translated, src_lang)
         except Exception:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-    except Exception:
-        # Non-fatal: in-memory cache still works
+            return found
+    return found
+
+
+def _sqlite_batch_put(entries: List[Tuple[str, str, str, Optional[str]]]) -> None:
+    db_path = _active_db_path()
+    if not db_path or not entries:
         return
+    now_ts = time.time()
+    with _db_lock:
+        try:
+            with sqlite3.connect(db_path, timeout=5.0) as conn:
+                _ensure_sqlite_schema(conn, db_path)
+                conn.executemany(
+                    """
+                    INSERT INTO translations (tl, digest, translated, source_lang, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(tl, digest) DO UPDATE SET
+                        translated = excluded.translated,
+                        source_lang = excluded.source_lang,
+                        updated_at = excluded.updated_at
+                    """,
+                    [(tl, dig, tr, src, now_ts) for tl, dig, tr, src in entries],
+                )
+                count_row = conn.execute("SELECT COUNT(*) FROM translations").fetchone()
+                total = int(count_row[0]) if count_row else 0
+                if total > MAX_CACHE_ENTRIES:
+                    excess = total - MAX_CACHE_ENTRIES
+                    conn.execute(
+                        "DELETE FROM translations WHERE rowid IN (SELECT rowid FROM translations ORDER BY updated_at ASC LIMIT ?)",
+                        (excess,),
+                    )
+                conn.commit()
+        except Exception:
+            return
 
 
-_load_disk_cache()
+def clear_memory_cache() -> None:
+    """Clear only the in-memory LRU cache without deleting the persistent SQLite cache."""
+    with _cache_lock:
+        _cache.clear()
 
 
 def clear_cache() -> None:
-    """Clear the in-memory and persistent translation LRU cache and reset upstream cooldown."""
+    """Clear the in-memory and persistent SQLite cache and reset upstream cooldown."""
     global _google_cooldown_until
-    with _cache_lock:
-        _cache.clear()
+    clear_memory_cache()
     with _google_lock:
         _google_cooldown_until = 0.0
-    if _disk_cache_enabled() and os.path.exists(_CACHE_FILE):
-        try:
-            os.remove(_CACHE_FILE)
-        except Exception:
-            pass
+    db_path = _active_db_path()
+    if db_path and os.path.exists(db_path):
+        with _db_lock:
+            try:
+                with sqlite3.connect(db_path, timeout=5.0) as conn:
+                    _ensure_sqlite_schema(conn, db_path)
+                    conn.execute("DELETE FROM translations")
+                    conn.commit()
+            except Exception:
+                pass
 
 
 def cache_size() -> int:
-    """Return the number of entries currently stored in the translation cache."""
+    """Return the number of entries currently stored in the in-memory translation cache."""
     with _cache_lock:
         return len(_cache)
+
+
+def normalize_target_lang(code: Optional[str]) -> Optional[str]:
+    """Normalize UI or locale codes (e.g. zh-CN, pt-BR, ja-JP) to canonical TARGET_LANG_MAP keys."""
+    if not code or not isinstance(code, str):
+        return None
+    clean = code.strip().lower().replace("_", "-")
+    if not clean or clean == "auto":
+        return None
+    if clean.startswith("zh"):
+        return "zh"
+    if clean == "jp" or clean == "ja" or clean.startswith("ja-"):
+        return "ja"
+    base = clean.split("-")[0]
+    return base if base in TARGET_LANG_MAP else None
 
 
 def _make_cache_key(tl: str, text: str) -> Tuple[str, str]:
@@ -217,6 +288,8 @@ def _normalize_lang_code(code: Optional[str]) -> Optional[str]:
         return None
     if clean.startswith("zh"):
         return "zh"
+    if clean == "jp" or clean == "ja" or clean.startswith("ja-"):
+        return "ja"
     return clean.split("-")[0] or None
 
 
@@ -308,7 +381,7 @@ def _split_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> List[str]:
 
 def _build_pooled_session() -> requests.Session:
     session = requests.Session()
-    adapter = HTTPAdapter(pool_connections=1, pool_maxsize=2)
+    adapter = HTTPAdapter(pool_connections=4, pool_maxsize=12)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
@@ -347,8 +420,12 @@ def _post_translation(chunk: str, tl: str, timeout: int) -> requests.Response:
 
 
 def _get_mymemory(sub_chunk: str, src_code: str, tl: str, timeout: int) -> requests.Response:
+    params: Dict[str, str] = {"q": sub_chunk, "langpair": f"{src_code}|{tl}"}
+    email = os.environ.get("MYMEMORY_EMAIL", "").strip()
+    if email:
+        params["de"] = email
     request_kwargs: Dict[str, Any] = {
-        "params": {"q": sub_chunk, "langpair": f"{src_code}|{tl}"},
+        "params": params,
         "headers": {"User-Agent": "Mozilla/5.0"},
         "timeout": timeout,
     }
@@ -391,11 +468,18 @@ def _is_already_target_language(text: str, target_lang: str) -> bool:
             and (len(cyrillic_chars) / len(alpha_chars)) >= 0.75
         )
 
+    if target_lang == "ja":
+        non_punct = [ch for ch in text if ch.isalnum()]
+        kana_chars = [ch for ch in non_punct if "\u3040" <= ch <= "\u30ff"]
+        return len(kana_chars) >= 10
+
     if target_lang == "zh":
         non_punct = [ch for ch in text if ch.isalnum()]
+        kana_chars = [ch for ch in non_punct if "\u3040" <= ch <= "\u30ff"]
         cjk_chars = [ch for ch in non_punct if "\u4e00" <= ch <= "\u9fff"]
         return (
-            len(cjk_chars) >= 20
+            not kana_chars
+            and len(cjk_chars) >= 20
             and bool(non_punct)
             and (len(cjk_chars) / len(non_punct)) >= 0.50
         )
@@ -446,6 +530,9 @@ def _detect_source_language(text: str, target_lang: str) -> str:
             return "ru"
     non_punct = [ch for ch in text if ch.isalnum()]
     if non_punct:
+        kana_chars = [ch for ch in non_punct if "\u3040" <= ch <= "\u30ff"]
+        if len(kana_chars) >= 2:
+            return "ja"
         cjk_chars = [ch for ch in non_punct if "\u4e00" <= ch <= "\u9fff"]
         if len(cjk_chars) >= 2 and (len(cjk_chars) / len(non_punct)) >= 0.4:
             return "zh"
@@ -531,8 +618,32 @@ def _request_google_chunk(chunk: str, tl: str, timeout: int) -> Tuple[str, Optio
     return translated, detected_src
 
 
+def _request_libretranslate(text: str, lang_key: str, timeout: int) -> Tuple[str, Optional[str]]:
+    base_url = os.environ.get("LIBRETRANSLATE_URL", "").strip().rstrip("/")
+    if not base_url:
+        raise RuntimeError("LibreTranslate URL not configured")
+    src_lang = _detect_source_language(text, lang_key)
+    tl_code = TARGET_LANG_MAP[lang_key]
+    body: Dict[str, Any] = {
+        "q": text,
+        "source": TARGET_LANG_MAP.get(src_lang, "auto"),
+        "target": "zh" if tl_code == "zh-CN" else tl_code,
+        "format": "text",
+    }
+    api_key = os.environ.get("LIBRETRANSLATE_API_KEY", "").strip()
+    if api_key:
+        body["api_key"] = api_key
+    res = requests.post(f"{base_url}/translate", json=body, timeout=timeout)
+    res.raise_for_status()
+    payload = res.json()
+    translated = payload.get("translatedText") if isinstance(payload, dict) else None
+    if not isinstance(translated, str) or not translated.strip():
+        raise ValueError("Empty LibreTranslate output")
+    return translated.strip(), src_lang
+
+
 def _request_chunk_translation(chunk: str, tl: str, timeout: int) -> Tuple[str, Optional[str]]:
-    lang_key = _normalize_lang_code(tl) or "en"
+    lang_key = normalize_target_lang(tl) or _normalize_lang_code(tl) or "en"
     allow_mymemory = (requests.post is _ORIGINAL_REQUESTS_POST) or (requests.get is not _ORIGINAL_REQUESTS_GET)
 
     if not _google_in_cooldown():
@@ -548,32 +659,102 @@ def _request_chunk_translation(chunk: str, tl: str, timeout: int) -> Tuple[str, 
             if not allow_mymemory:
                 raise
 
-    if not allow_mymemory:
-        raise RuntimeError("Upstream translation unavailable")
+    if allow_mymemory:
+        try:
+            return _request_mymemory_translation(chunk, lang_key, timeout)
+        except Exception:
+            if os.environ.get("LIBRETRANSLATE_URL", "").strip():
+                return _request_libretranslate(chunk, lang_key, timeout)
+            raise
 
-    return _request_mymemory_translation(chunk, lang_key, timeout)
+    raise RuntimeError("Upstream translation unavailable")
+
+
+def _translate_google_packed_blocks(
+    items: List[str], tl: str, timeout: int = 8
+) -> Dict[str, Tuple[str, Optional[str]]]:
+    """Pack multiple short texts using indexed markers to minimize upstream HTTP roundtrips."""
+    if not items:
+        return {}
+
+    blocks: List[Tuple[List[str], str]] = []
+    cur_items: List[str] = []
+    cur_parts: List[str] = []
+    cur_len = 0
+
+    for raw in items:
+        idx = len(cur_items)
+        marker = f"[[[HUNTLY_SEP_{idx}]]]"
+        addition = f"\n{marker}\n{raw}" if cur_items else f"{marker}\n{raw}"
+        if cur_items and (
+            len(cur_items) >= PACKED_BLOCK_MAX_ITEMS or cur_len + len(addition) > PACKED_BLOCK_MAX_CHARS
+        ):
+            blocks.append((cur_items, "".join(cur_parts)))
+            cur_items = []
+            cur_parts = []
+            cur_len = 0
+            idx = 0
+            marker = f"[[[HUNTLY_SEP_{idx}]]]"
+            addition = f"{marker}\n{raw}"
+        cur_items.append(raw)
+        cur_parts.append(addition)
+        cur_len += len(addition)
+
+    if cur_items:
+        blocks.append((cur_items, "".join(cur_parts)))
+
+    def _run_block(block_tuple: Tuple[List[str], str]) -> Dict[str, Tuple[str, Optional[str]]]:
+        block_items, packed_payload = block_tuple
+        try:
+            translated_blob, detected_src = _request_google_chunk(packed_payload, tl, timeout)
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            if status in (429, 403):
+                _mark_google_rate_limited()
+            return {}
+        except Exception:
+            return {}
+
+        matches = list(_PACK_SEP_RE.finditer(translated_blob))
+        if len(matches) != len(block_items):
+            return {}
+        parsed: Dict[str, Tuple[str, Optional[str]]] = {}
+        for pos, m in enumerate(matches):
+            if int(m.group(1)) != pos:
+                return {}
+            start_idx = m.end()
+            end_idx = matches[pos + 1].start() if pos + 1 < len(matches) else len(translated_blob)
+            seg = translated_blob[start_idx:end_idx].strip()
+            if not seg:
+                return {}
+            parsed[block_items[pos]] = (seg, detected_src)
+        return parsed
+
+    resolved: Dict[str, Tuple[str, Optional[str]]] = {}
+    if len(blocks) == 1:
+        resolved.update(_run_block(blocks[0]))
+    else:
+        workers = min(TRANSLATE_WORKERS, len(blocks))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for block_out in executor.map(_run_block, blocks):
+                resolved.update(block_out)
+    return resolved
 
 
 def _translate_texts_parallel(
     texts: List[str], lang_key: str, timeout: int = 8
 ) -> Dict[str, Tuple[str, Optional[str]]]:
-    """Translate unique non-empty strings using cache, fast-path, Google gtx, and MyMemory fallback."""
+    """Translate unique non-empty strings using RAM + SQLite cache, packed blocks and 10-worker pool."""
     tl = TARGET_LANG_MAP[lang_key]
     resolved: Dict[str, Tuple[str, Optional[str]]] = {}
-    pending_chunks_by_text: Dict[str, List[str]] = {}
-    unique_chunks: List[str] = []
-    seen_chunks: Set[str] = set()
-    any_new_cache_entry = False
+    uncached_candidates: List[str] = []
+    seen_raw: Set[str] = set()
+    sqlite_rows_to_save: List[Tuple[str, str, str, Optional[str]]] = []
 
     for raw in texts:
-        if (
-            not isinstance(raw, str)
-            or not raw
-            or not raw.strip()
-            or raw in resolved
-            or raw in pending_chunks_by_text
-        ):
+        if not isinstance(raw, str) or not raw or not raw.strip() or raw in seen_raw:
             continue
+        seen_raw.add(raw)
 
         cached = _cache_get(tl, raw)
         if cached is not None:
@@ -582,10 +763,49 @@ def _translate_texts_parallel(
 
         if _is_already_target_language(raw, lang_key):
             _cache_put(tl, raw, raw, lang_key)
-            any_new_cache_entry = True
+            _, dig = _make_cache_key(tl, raw)
+            sqlite_rows_to_save.append((tl, dig, raw, lang_key))
             resolved[raw] = (raw, lang_key)
             continue
 
+        uncached_candidates.append(raw)
+
+    # 1. Batch lookup against persistent SQLite cache before making any external HTTP calls
+    if uncached_candidates:
+        digest_to_raw = {_make_cache_key(tl, raw)[1]: raw for raw in uncached_candidates}
+        sqlite_hits = _sqlite_batch_get(tl, list(digest_to_raw.keys()))
+        remaining_after_sqlite: List[str] = []
+        for dig, raw in digest_to_raw.items():
+            hit = sqlite_hits.get(dig)
+            if hit is not None:
+                _cache_put(tl, raw, hit[0], hit[1])
+                resolved[raw] = hit
+            else:
+                remaining_after_sqlite.append(raw)
+        uncached_candidates = remaining_after_sqlite
+
+    # 2. Try packed delimiter blocks when running live Google gtx with multiple short texts
+    if (
+        len(uncached_candidates) > 1
+        and requests.post is _ORIGINAL_REQUESTS_POST
+        and not _google_in_cooldown()
+    ):
+        packable = [t for t in uncached_candidates if len(t) <= MAX_CHUNK_CHARS and "HUNTLY_SEP_" not in t]
+        if len(packable) > 1:
+            packed_hits = _translate_google_packed_blocks(packable, tl, timeout=timeout)
+            if packed_hits:
+                for raw, (tr_text, src_lang) in packed_hits.items():
+                    _cache_put(tl, raw, tr_text, src_lang)
+                    _, dig = _make_cache_key(tl, raw)
+                    sqlite_rows_to_save.append((tl, dig, tr_text, src_lang))
+                    resolved[raw] = (tr_text, src_lang)
+                uncached_candidates = [t for t in uncached_candidates if t not in packed_hits]
+
+    # 3. Parallel chunk translation via ThreadPoolExecutor(max_workers=10) for remaining texts
+    pending_chunks_by_text: Dict[str, List[str]] = {}
+    unique_chunks: List[str] = []
+    seen_chunks: Set[str] = set()
+    for raw in uncached_candidates:
         chunks = _split_chunks(raw, MAX_CHUNK_CHARS)
         pending_chunks_by_text[raw] = chunks
         for ch in chunks:
@@ -632,11 +852,12 @@ def _translate_texts_parallel(
                 translated_parts[0] if len(translated_parts) == 1 else "\n\n".join(translated_parts)
             )
             _cache_put(tl, raw, translated, source_lang)
-            any_new_cache_entry = True
+            _, dig = _make_cache_key(tl, raw)
+            sqlite_rows_to_save.append((tl, dig, translated, source_lang))
             resolved[raw] = (translated, source_lang)
 
-    if any_new_cache_entry:
-        _save_disk_cache()
+    if sqlite_rows_to_save:
+        _sqlite_batch_put(sqlite_rows_to_save)
 
     return resolved
 
@@ -648,7 +869,7 @@ def translate_text_with_meta(
     if not text or not text.strip():
         return text, None
 
-    lang_key = _normalize_lang_code(target_lang)
+    lang_key = normalize_target_lang(target_lang)
     if not lang_key or lang_key not in TARGET_LANG_MAP:
         return text, None
 

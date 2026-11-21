@@ -198,6 +198,7 @@ document.addEventListener("DOMContentLoaded", () => {
       stateSelect.options[0].textContent = countrySelect.value ? t("allStates") : t("selectCountryFirst");
     }
 
+    hydrateSearchResultsTranslations();
     renderFilteredResults();
     if (!isSearching && searchResults.length > 0) {
       ensureTranslations(searchResults, { mode: "preview" });
@@ -285,6 +286,16 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function normalizeJobRecord(rawJob) {
+    if (!rawJob || typeof rawJob !== "object") return rawJob;
+    return {
+      ...rawJob,
+      original_title: rawJob.original_title ?? rawJob.title ?? "",
+      original_excerpt: rawJob.original_excerpt ?? rawJob.excerpt ?? "",
+      original_description: rawJob.original_description ?? rawJob.description ?? "",
+    };
+  }
+
   function hydrateSearchResultsTranslations() {
     searchResults.forEach((item) => {
       if (!item || !item.id) return;
@@ -308,17 +319,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function getDisplayJob(job) {
     if (!job || !job.id) return job;
+    const origTitle = job.original_title ?? job.title ?? "";
+    const origDesc = job.original_description ?? job.description ?? "";
+    const origExcerpt = job.original_excerpt ?? job.excerpt ?? origDesc;
     const cached = getCachedTranslationForJob(job, currentLang);
-    if (!cached) return job;
+    if (!cached) {
+      return {
+        ...job,
+        title: origTitle,
+        excerpt: origExcerpt,
+        description: origDesc,
+        original_title: origTitle,
+        original_excerpt: origExcerpt,
+        original_description: origDesc,
+      };
+    }
     const isFull = Boolean(cached.is_full);
     const excerptText = isFull
-      ? (cached.description || cached.excerpt || job.description)
-      : (cached.excerpt || job.description);
+      ? (cached.description || cached.excerpt || origDesc)
+      : (cached.excerpt || origExcerpt);
     return {
       ...job,
-      title: cached.title || job.title,
+      original_title: origTitle,
+      original_excerpt: origExcerpt,
+      original_description: origDesc,
+      title: cached.title || origTitle,
       excerpt: excerptText,
-      description: isFull ? (cached.description || job.description) : job.description,
+      description: isFull ? (cached.description || origDesc) : origDesc,
       source_lang: cached.source_lang || null,
       target_lang: cached.target_lang || currentLang,
       was_translated: Boolean(cached.was_translated),
@@ -833,7 +860,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const response = await fetch("/results?type=jobs");
     if (!response.ok) return;
     const data = await response.json();
-    searchResults = Array.isArray(data) ? data : [];
+    searchResults = Array.isArray(data) ? data.map(normalizeJobRecord) : [];
     hydrateSearchResultsTranslations();
     renderFilteredResults();
   }
@@ -892,9 +919,12 @@ document.addEventListener("DOMContentLoaded", () => {
           if (quickTerm) {
             const includeHaystack = normalizeLookup(
               [
+                item.original_title,
                 item.title,
                 item.company,
                 item.location,
+                item.original_excerpt,
+                item.original_description,
                 item.description,
                 display.title,
                 display.excerpt,
@@ -910,7 +940,10 @@ document.addEventListener("DOMContentLoaded", () => {
           if (excludeTerms.length > 0) {
             const excludeHaystack = normalizeLookup(
               [
+                item.original_title,
                 item.title,
+                item.original_excerpt,
+                item.original_description,
                 item.description,
                 display.title,
                 display.excerpt,
