@@ -9,9 +9,9 @@ Embora existisse um seletor para 8 idiomas (`pt`, `en`, `es`, `fr`, `it`, `de`, 
 
 ## Decisão
 
-1. **Separação estrita entre UI e conteúdo da vaga (`.agents/rules/huntly.md`):**
-   - **Interface 100% traduzida (`static/i18n.js` e `static/script.js`):** países (`countries`), sugestões de cargos (`roleSuggestions` com 29 itens nos 8 idiomas), atributos `aria-label` (`data-i18n-aria-label`), estados de vazio/paginação/toolbar, datas relativas (`formatRelativeTime()` com parser multilíngue para todas as 8 línguas), tipo de emprego (`translateEmploymentType`) e nível de experiência (`translateExperienceLevel`).
-   - **Conteúdo original preservado:** título (`title`), empresa (`company`) e descrição (`description`) das vagas permanecem exatamente como publicados no LinkedIn.
+1. **Separação entre interface e conteúdo da vaga (atualizada pela ADR 005):**
+   - **Interface 100% traduzida (`static/i18n.js` e `static/script.js`):** países (`countries`), sugestões de cargos (`roleSuggestions`, ampliadas para 51 itens na ADR 005), atributos `aria-label` (`data-i18n-aria-label`), estados de vazio/paginação/toolbar, datas relativas (`formatRelativeTime()` com parser multilíngue para todas as 8 línguas), tipo de emprego (`translateEmploymentType`) e nível de experiência (`translateExperienceLevel`).
+   - **Conteúdo das vagas (`title` e `description`):** originalmente mantidos sem alteração; a partir da **ADR 005**, passaram a ser traduzidos automaticamente sob demanda via `POST /translate` (`translator.py`) quando o usuário seleciona um idioma diferente de português (`pt`), mantendo os originais intactos em memória com cache e fallback seguro. (`company` permanece inalterado.)
 2. **Códigos estruturados no backend com retrocompatibilidade (`app.py`, `state.py`, `scraper.py`):**
    - `SearchState` e as respostas JSON das rotas HTTP mantêm `status_message`, `error` e `message` originais (preservando 100% da suíte `tests/`) e passam a incluir `status_code`, `status_params`, `error_code` e `message_code`, resolvidos dinamicamente pelo frontend via `i18n.js`.
    - `get_job_detail()` extrai `employment_type_code` e `experience_level_code` a partir dos cabeçalhos/valores nos 8 idiomas, mantendo também as chaves originais para exportação CSV/JSON.
