@@ -213,6 +213,18 @@
 
     <!-- Seção de Resultados em Cards abaixo dos filtros -->
     <section id="resultados" class="results-section" aria-label="Resultados da Busca" data-i18n-aria-label="ariaResultsSection">
+      <div id="results-tabs" class="results-tabs" role="tablist" style="display: none"
+        aria-label="Classificação de resultados" data-i18n-aria-label="ariaResultsTabs">
+        <button type="button" class="results-tab active" id="tab-matched" role="tab" aria-selected="true" data-tab="matched">
+          <span data-i18n="tabMatched">Correspondentes</span>
+          <span class="tab-count" id="tab-matched-count">0</span>
+        </button>
+        <button type="button" class="results-tab" id="tab-recommended" role="tab" aria-selected="false" data-tab="recommended">
+          <span data-i18n="tabRecommended">Talvez você goste</span>
+          <span class="tab-count" id="tab-recommended-count">0</span>
+        </button>
+      </div>
+
       <div id="results-toolbar" class="results-toolbar" style="display: none">
         <div class="results-filters">
           <div class="quick-filter-box">

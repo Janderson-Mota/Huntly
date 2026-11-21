@@ -195,6 +195,194 @@ EXPERIENCE_LEVEL_VALUE_CODES: Dict[str, str] = {
     "不适用": "not_applicable",
 }
 
+WORK_MODE_HEADERS = {
+    "tipo de local de trabalho",
+    "modalidade de trabalho",
+    "workplace type",
+    "workplace",
+    "tipo de lugar de trabajo",
+    "modalidad",
+    "type de lieu de travail",
+    "mode de travail",
+    "tipo di sede di lavoro",
+    "modalita di lavoro",
+    "arbeitsort",
+    "arbeitsmodell",
+    "формат работы",
+    "тип занятости на месте",
+    "工作模式",
+    "工作地点类型",
+}
+
+WORK_MODE_VALUE_CODES: Dict[str, str] = {
+    "remoto": "remote",
+    "remote": "remote",
+    "teletrabalho": "remote",
+    "teletrabajo": "remote",
+    "teletravail": "remote",
+    "lavoro da remoto": "remote",
+    "homeoffice": "remote",
+    "удаленно": "remote",
+    "удаленная работа": "remote",
+    "远程": "remote",
+    "hibrido": "hybrid",
+    "hibrida": "hybrid",
+    "hybrid": "hybrid",
+    "hybride": "hybrid",
+    "ibrido": "hybrid",
+    "гибрид": "hybrid",
+    "гибридный формат": "hybrid",
+    "混合办公": "hybrid",
+    "presencial": "onsite",
+    "on-site": "onsite",
+    "on site": "onsite",
+    "onsite": "onsite",
+    "sur site": "onsite",
+    "in sede": "onsite",
+    "vor ort": "onsite",
+    "в офисе": "onsite",
+    "очно": "onsite",
+    "现场办公": "onsite",
+}
+
+WORK_MODE_FILTER_TO_CODE: Dict[str, str] = {
+    "2": "remote",
+    "3": "hybrid",
+    "1": "onsite",
+}
+
+STATE_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "acre": ("acre", "ac"),
+    "alagoas": ("alagoas", "al"),
+    "amapa": ("amapa", "ap"),
+    "amazonas": ("amazonas", "am"),
+    "bahia": ("bahia", "ba"),
+    "ceara": ("ceara", "ce"),
+    "distrito federal": ("distrito federal", "df", "brasilia"),
+    "espirito santo": ("espirito santo", "es"),
+    "goias": ("goias", "go"),
+    "maranhao": ("maranhao", "ma"),
+    "mato grosso": ("mato grosso", "mt"),
+    "mato grosso do sul": ("mato grosso do sul", "ms"),
+    "minas gerais": ("minas gerais", "mg"),
+    "para": ("para", "pa"),
+    "paraiba": ("paraiba", "pb"),
+    "parana": ("parana", "pr"),
+    "pernambuco": ("pernambuco", "pe"),
+    "piaui": ("piaui", "pi"),
+    "rio de janeiro": ("rio de janeiro", "rj"),
+    "rio grande do norte": ("rio grande do norte", "rn"),
+    "rio grande do sul": ("rio grande do sul", "rs"),
+    "rondonia": ("rondonia", "ro"),
+    "roraima": ("roraima", "rr"),
+    "santa catarina": ("santa catarina", "sc"),
+    "sao paulo": ("sao paulo", "san pablo", "sp"),
+    "sergipe": ("sergipe", "se"),
+    "tocantins": ("tocantins", "to"),
+    "california": ("california", "ca"),
+    "new york": ("new york", "ny"),
+    "texas": ("texas", "tx"),
+    "washington": ("washington", "wa"),
+    "florida": ("florida", "fl"),
+    "massachusetts": ("massachusetts", "ma"),
+    "ontario": ("ontario", "on"),
+    "british columbia": ("british columbia", "bc"),
+    "quebec": ("quebec", "qc"),
+    "alberta": ("alberta", "ab"),
+    "lisboa": ("lisboa", "lisbon"),
+    "bavaria": ("bavaria", "baviera", "bayern"),
+    "berlin": ("berlin", "berlim"),
+    "hamburg": ("hamburg", "hamburgo"),
+    "catalonia": ("catalonia", "cataluna", "catalunha"),
+    "andalusia": ("andalusia", "andalucia", "andaluzia"),
+    "munich": ("munich", "munchen", "munique"),
+    "seville": ("seville", "sevilla", "sevilha"),
+}
+
+_EXP_TOKEN_TO_TARGETS: Dict[str, Tuple[str, ...]] = {
+    "1": ("internship",),
+    "2": ("entry_level",),
+    "3": ("mid",),
+    "3,4": ("mid",),
+    "4": ("senior",),
+    "5": ("director",),
+    "6": ("director",),
+    "5,6": ("director",),
+}
+
+_META_TO_TARGETS: Dict[str, set[str]] = {
+    "internship": {"internship"},
+    "entry_level": {"entry_level"},
+    "associate": {"mid"},
+    "mid_senior": {"mid", "senior"},
+    "director": {"director"},
+    "executive": {"director"},
+}
+
+_NEGATED_WORK_MODE_RE = re.compile(
+    r"\b(?:nao\s+e|nao\s+sera|not|no\s+es|non\s+e|pas)\s+(?:100%\s+)?(?:remot[oae]|h[ií]brid[oa]|hybrid|presencial|on[\s-]?site|remote)\b",
+    re.IGNORECASE,
+)
+
+_HYBRID_PATTERNS = (
+    re.compile(r"\bhibrid[oa]s?\b|\bhybrid(?:e|ed)?\b|\bibrid[oa]\b", re.IGNORECASE),
+    re.compile(r"\b\d+\s*(?:dias?|days?)\s*(?:no\s+escritorio|in[\s-]?office|on[\s-]?site|presencia(?:l|is))\b", re.IGNORECASE),
+)
+_REMOTE_PATTERNS = (
+    re.compile(r"\bremot[oae]s?\b|\bhome[\s-]?office\b|\bteletrabalho\b|\bteletrabajo\b|\bteletravail\b|\bwork\s+from\s+home\b|\bwfh\b", re.IGNORECASE),
+)
+_ONSITE_PATTERNS = (
+    re.compile(r"\bpresencial(?:mente)?\b|\bon[\s-]?site\b|\bonsite\b|\bin[\s-]?person\b|\bin[\s-]?office\b|\bsur\s+site\b|\bin\s+sede\b|\bvor\s+ort\b", re.IGNORECASE),
+)
+
+_TITLE_EXP_PATTERNS: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
+    (
+        "internship",
+        (
+            re.compile(r"\bestagi(?:o|ari[oa])\b|\bintern(?:ship)?\b|\bpracticas\b|\bbecari[oa]\b|\btirocinio\b|\bpraktikum\b|\bpraktikant(?:in)?\b|\btrainee\b", re.IGNORECASE),
+            re.compile(r"\bstagiaire\b|\bstage\s+(?:de|en|em|it|ti|dev|data|tech|software)\b|^\s*stage\b|\(\s*stage\s*\)", re.IGNORECASE),
+        ),
+    ),
+    (
+        "entry_level",
+        (
+            re.compile(r"\bjunior\b|\bjr\.?(?!\w)|\bentry[\s-]?level\b|\bgraduate\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+i\b|\bnivel\s+i\b|\blevel\s+1\b", re.IGNORECASE),
+        ),
+    ),
+    (
+        "mid",
+        (
+            re.compile(r"\bpleno\b|\bmid[\s-]?level\b|\bsemi[\s-]?senior\b|\bssr\.?(?!\w)|\bmiddle\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+ii\b|\bnivel\s+ii\b|\blevel\s+2\b", re.IGNORECASE),
+        ),
+    ),
+    (
+        "senior",
+        (
+            re.compile(r"\bsenior\b|\bsr\.?(?!\w)|\bstaff\b|\bprincipal\b|\btech\s+lead\b|\bteam\s+lead\b|\blead\s+(?:engineer|developer|architect|analyst|designer|scientist|qa|sre|devops)\b|\b(?:engineering|software|backend|frontend|data|qa|devops|cloud|product)\s+lead\b|\barquitet[oa]\b|\barchitect\b|\bespecialista\b|\bspecialist\b|\b(?:dev|developer|desenvolvedor|engenheiro|engineer|analista|analyst|qa|sre)\s+iii\b|\bnivel\s+iii\b|\blevel\s+3\b", re.IGNORECASE),
+        ),
+    ),
+    (
+        "director",
+        (
+            re.compile(r"\bdiretor(?:a)?\b|\bdirector\b|\bdirettore\b|\bdirektor\b|\bdirecteur\b|\bhead\s+of\b|\bvp\b|\bvice\s+president\b|\bchief\b|\bcto\b|\bcio\b|\bciso\b|\bcpo\b|\bceo\b|\bcfo\b|\bexecutiv[oa]\b|\bexecutive\b|\bengineering\s+manager\b", re.IGNORECASE),
+        ),
+    ),
+)
+
+_TITLE_EXP_NON_LATIN: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("internship", ("стажировк", "стажер", "стажёр", "实习")),
+    ("entry_level", ("начальн", "младш", "初级")),
+    ("mid", ("средн", "中级")),
+    ("senior", ("старш", "ведущ", "高级", "资深")),
+    ("director", ("директор", "руководител", "总监", "高管")),
+)
+
+_WORK_MODE_NON_LATIN: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("hybrid", ("гибрид", "混合")),
+    ("remote", ("удаленн", "удалённ", "远程")),
+    ("onsite", ("в офисе", "очно", "现场办公")),
+)
+
 MAX_RETRIES = 3
 REQUEST_TIMEOUT = 20
 DETAIL_WORKERS = 2
@@ -607,6 +795,164 @@ def job_matches_country(job_location: Optional[str], canonical_country: str) -> 
     return False
 
 
+def _match_work_mode_text(text: str) -> Optional[str]:
+    if not text:
+        return None
+    raw_lower = text.lower()
+    cleaned_raw = _NEGATED_WORK_MODE_RE.sub(" ", raw_lower)
+    norm = _normalize_text(cleaned_raw)
+
+    for mode, patterns in (("hybrid", _HYBRID_PATTERNS), ("remote", _REMOTE_PATTERNS), ("onsite", _ONSITE_PATTERNS)):
+        if any(pat.search(norm) for pat in patterns):
+            return mode
+    for mode, tokens in _WORK_MODE_NON_LATIN:
+        if any(tok in raw_lower for tok in tokens):
+            return mode
+    return None
+
+
+def detect_work_mode(job: Dict[str, Any]) -> Optional[str]:
+    """Detect job work mode ('remote', 'hybrid', 'onsite') from metadata, title, location, and description."""
+    existing = job.get("work_mode_code")
+    if existing in ("remote", "hybrid", "onsite"):
+        return existing
+
+    high_priority = " ".join(
+        str(val)
+        for val in (
+            job.get("work_mode_raw"),
+            job.get("title"),
+            job.get("location"),
+        )
+        if val
+    )
+    detected = _match_work_mode_text(high_priority)
+    if detected:
+        return detected
+
+    desc = job.get("description") or ""
+    return _match_work_mode_text(str(desc))
+
+
+def detect_title_experience_levels(title: Optional[str]) -> set[str]:
+    """Infer experience level buckets semantically from a job title."""
+    if not title:
+        return set()
+    raw_lower = str(title).lower()
+    norm = _normalize_text(str(title))
+    detected: set[str] = set()
+    for level, patterns in _TITLE_EXP_PATTERNS:
+        if any(pat.search(norm) for pat in patterns):
+            detected.add(level)
+    for level, tokens in _TITLE_EXP_NON_LATIN:
+        if any(tok in raw_lower for tok in tokens):
+            detected.add(level)
+    return detected
+
+
+def normalize_experience_targets(experience_level: Optional[Union[str, List[str]]]) -> set[str]:
+    """Normalize selected experience filter tokens into semantic buckets."""
+    if not experience_level:
+        return set()
+    items = [experience_level] if isinstance(experience_level, str) else list(experience_level)
+    targets: set[str] = set()
+    for item in items:
+        if item is None:
+            continue
+        raw = str(item).strip()
+        if not raw:
+            continue
+        if raw in _EXP_TOKEN_TO_TARGETS:
+            targets.update(_EXP_TOKEN_TO_TARGETS[raw])
+        else:
+            for part in raw.split(","):
+                tok = part.strip()
+                if tok in _EXP_TOKEN_TO_TARGETS:
+                    targets.update(_EXP_TOKEN_TO_TARGETS[tok])
+    return targets
+
+
+def job_matches_experience(job: Dict[str, Any], experience_level: Optional[Union[str, List[str]]]) -> bool:
+    """Strictly verify if a job satisfies at least one selected experience level."""
+    targets = normalize_experience_targets(experience_level)
+    if not targets:
+        return True
+
+    meta_code = job.get("experience_level_code")
+    if meta_code == "not_applicable":
+        return False
+
+    title_levels = detect_title_experience_levels(job.get("title"))
+    if title_levels and not (title_levels & targets):
+        return False
+
+    if meta_code and meta_code in _META_TO_TARGETS:
+        return bool(_META_TO_TARGETS[meta_code] & targets)
+
+    return bool(title_levels & targets)
+
+
+def job_matches_work_mode(job: Dict[str, Any], work_mode: Optional[Union[str, List[str]]]) -> bool:
+    """Strictly verify if a job matches at least one selected work mode."""
+    codes = _flatten_filter_codes(work_mode)
+    if not codes:
+        return True
+    selected_modes = {WORK_MODE_FILTER_TO_CODE[c] for c in codes if c in WORK_MODE_FILTER_TO_CODE}
+    if not selected_modes:
+        return True
+    detected = detect_work_mode(job)
+    return detected in selected_modes if detected else False
+
+
+def _location_part_matches(norm_job_loc: str, requested_part: str) -> bool:
+    norm_part = _normalize_text(requested_part)
+    if not norm_part:
+        return True
+    candidates = STATE_ALIASES.get(norm_part, (norm_part,))
+    return any(bool(re.search(rf"(?<!\w){re.escape(cand)}(?!\w)", norm_job_loc)) for cand in candidates)
+
+
+def job_matches_location(job_location: Optional[str], requested_location: str) -> bool:
+    """Strictly validate country plus requested city or state/region."""
+    if not requested_location or not requested_location.strip():
+        return True
+
+    _norm_req, canonical_country, _ = normalize_location_for_linkedin(requested_location)
+    if canonical_country and not job_matches_country(job_location, canonical_country):
+        return False
+
+    if not job_location or not job_location.strip():
+        return False
+
+    req_parts = [part.strip() for part in requested_location.split(",") if part.strip()]
+    if canonical_country and req_parts and COUNTRY_ALIASES.get(_normalize_text(req_parts[-1])) == canonical_country:
+        subparts = req_parts[:-1]
+    else:
+        subparts = req_parts
+
+    if not subparts:
+        return True
+
+    norm_job_loc = _normalize_text(job_location)
+    if len(subparts) >= 2:
+        city_part, _state_part = subparts[0], subparts[1]
+        return _location_part_matches(norm_job_loc, city_part)
+    return _location_part_matches(norm_job_loc, subparts[0])
+
+
+def classify_job_match(
+    job: Dict[str, Any],
+    requested_location: str = "",
+    experience_level: Optional[Union[str, List[str]]] = None,
+    work_mode: Optional[Union[str, List[str]]] = None,
+) -> str:
+    """Return 'matched' when a job satisfies all active filters strictly, otherwise 'recommended'."""
+    loc_ok = job_matches_location(job.get("location"), requested_location)
+    exp_ok = job_matches_experience(job, experience_level)
+    wt_ok = job_matches_work_mode(job, work_mode)
+    return "matched" if (loc_ok and exp_ok and wt_ok) else "recommended"
+
+
 def calculate_time_range(max_date: Optional[str]) -> str:
     """Convert relative, LinkedIn, or YYYY-MM-DD date strings to LinkedIn f_TPR format."""
     if not max_date:
@@ -921,6 +1267,15 @@ def get_job_detail(
                         lvl_code = EXPERIENCE_LEVEL_VALUE_CODES.get(norm_val)
                         if lvl_code:
                             detail["experience_level_code"] = lvl_code
+                    elif norm_h3 in WORK_MODE_HEADERS:
+                        wt_code = WORK_MODE_VALUE_CODES.get(norm_val)
+                        if wt_code:
+                            detail["work_mode_code"] = wt_code
+
+            if "work_mode_code" not in detail:
+                inferred_wt = detect_work_mode(detail)
+                if inferred_wt:
+                    detail["work_mode_code"] = inferred_wt
 
             return detail
         except Exception as exc:
@@ -1089,6 +1444,15 @@ def search_jobs_thread(
                             and not detail.get("error")
                             and (not canonical_country or job_matches_country(detail.get("location"), canonical_country))
                         ):
+                            inferred_wt = detect_work_mode(detail)
+                            if inferred_wt and not detail.get("work_mode_code"):
+                                detail["work_mode_code"] = inferred_wt
+                            detail["match_category"] = classify_job_match(
+                                detail,
+                                requested_location=location,
+                                experience_level=experience_level,
+                                work_mode=place,
+                            )
                             jobs.append(detail)
                             jobs.sort(key=lambda item: job_order.get(str(item.get("id")), len(job_order)))
                             jobs_state.set_results(list(jobs), run_id=run_id)

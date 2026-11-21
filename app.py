@@ -5,6 +5,7 @@ import json
 import os
 import threading
 from typing import Any, Dict, List
+import unicodedata
 
 from flask import Flask, Response, jsonify, render_template, request
 
@@ -228,12 +229,72 @@ def get_search_status():
     return jsonify(jobs_state.snapshot(include_results=include_results))
 
 
+def _normalize_search_text(text: Any) -> str:
+    decomposed = unicodedata.normalize("NFD", str(text or ""))
+    stripped = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    return stripped.lower().strip()
+
+
+def _filter_results_by_tab(
+    items: List[Dict[str, Any]],
+    tab: str = "all",
+    q: str = "",
+    exclude: str = "",
+) -> List[Dict[str, Any]]:
+    filtered = [item for item in items if not item.get("error")]
+    normalized_tab = (tab or "all").strip().lower()
+    if normalized_tab == "matched":
+        filtered = [item for item in filtered if item.get("match_category", "matched") != "recommended"]
+    elif normalized_tab == "recommended":
+        filtered = [item for item in filtered if item.get("match_category") == "recommended"]
+
+    quick_term = _normalize_search_text(q)
+    if quick_term:
+        filtered = [
+            item
+            for item in filtered
+            if quick_term
+            in _normalize_search_text(
+                " ".join(
+                    str(item.get(field) or "")
+                    for field in ("title", "company", "location", "description")
+                )
+            )
+        ]
+
+    exclude_terms = [
+        _normalize_search_text(part)
+        for part in str(exclude or "").split(",")
+        if _normalize_search_text(part)
+    ]
+    if exclude_terms:
+        filtered = [
+            item
+            for item in filtered
+            if not any(
+                term
+                in _normalize_search_text(
+                    " ".join(str(item.get(field) or "") for field in ("title", "description"))
+                )
+                for term in exclude_terms
+            )
+        ]
+
+    return filtered
+
+
 @app.route("/results")
 def get_search_results():
     err = _validate_search_type(request.args.get("type", "jobs"))
     if err:
         return err
-    return jsonify(jobs_state.get_results())
+    results = jobs_state.get_results()
+    tab = request.args.get("tab", "all")
+    q = request.args.get("q", "")
+    exclude = request.args.get("exclude", "")
+    if tab and tab.strip().lower() != "all" or q or exclude:
+        return jsonify(_filter_results_by_tab(results, tab=tab, q=q, exclude=exclude))
+    return jsonify(results)
 
 
 @app.route("/job/<job_id>")
@@ -326,12 +387,23 @@ def generate_csv(items: List[Dict[str, Any]]) -> str:
     return output.getvalue()
 
 
-def _get_export_results(search_type: str, lang: str = ""):
+def _get_export_results(
+    search_type: str,
+    lang: str = "",
+    tab: str = "all",
+    q: str = "",
+    exclude: str = "",
+):
     err = _validate_search_type(search_type)
     if err:
         return None, None, err
 
-    results = [item for item in jobs_state.get_results() if not item.get("error")]
+    results = _filter_results_by_tab(
+        jobs_state.get_results(),
+        tab=tab,
+        q=q,
+        exclude=exclude,
+    )
     if not results:
         return None, None, (
             jsonify({"error": "Nenhum resultado disponível para exportação.", "error_code": "errNoExportResults"}),
@@ -348,6 +420,9 @@ def export_to_csv():
     results, base_filename, err_response = _get_export_results(
         request.args.get("type", "jobs"),
         lang=request.args.get("lang", ""),
+        tab=request.args.get("tab", "all"),
+        q=request.args.get("q", ""),
+        exclude=request.args.get("exclude", ""),
     )
     if err_response:
         return err_response
@@ -365,6 +440,9 @@ def export_to_json():
     results, base_filename, err_response = _get_export_results(
         request.args.get("type", "jobs"),
         lang=request.args.get("lang", ""),
+        tab=request.args.get("tab", "all"),
+        q=request.args.get("q", ""),
+        exclude=request.args.get("exclude", ""),
     )
     if err_response:
         return err_response

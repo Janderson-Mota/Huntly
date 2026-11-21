@@ -21,6 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const feedbackBanner = document.getElementById("feedback-banner");
 
   const resultsToolbar = document.getElementById("results-toolbar");
+  const resultsTabs = document.getElementById("results-tabs");
+  const tabButtons = document.querySelectorAll(".results-tab");
+  const tabMatchedCount = document.getElementById("tab-matched-count");
+  const tabRecommendedCount = document.getElementById("tab-recommended-count");
   const resultsGrid = document.getElementById("results-grid");
   const paginationBar = document.getElementById("pagination-bar");
   const emptyState = document.getElementById("empty-state");
@@ -212,6 +216,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const MAX_SESSION_TRANSLATIONS = 200;
   let isSearching = false;
   let searchResults = [];
+  let activeTab = "matched";
   let currentPage = 1;
   let pollTimeout = null;
   let lastCollectedCount = -1;
@@ -522,10 +527,30 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  tabButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const nextTab = btn.dataset.tab || "matched";
+      if (activeTab === nextTab) return;
+      activeTab = nextTab;
+      currentPage = 1;
+      renderFilteredResults();
+    });
+  });
+
   exportButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (!searchResults.length) return;
-      window.location.href = `/export/${btn.dataset.format}?type=jobs&lang=${encodeURIComponent(currentLang)}`;
+      const tabJobs = getJobsForActiveTab();
+      if (!tabJobs.length) return;
+      const params = new URLSearchParams({
+        type: "jobs",
+        lang: currentLang,
+        tab: activeTab,
+      });
+      const q = quickFilterInput.value.trim();
+      const exc = excludeFilterInput ? excludeFilterInput.value.trim() : "";
+      if (q) params.set("q", q);
+      if (exc) params.set("exclude", exc);
+      window.location.href = `/export/${btn.dataset.format}?${params.toString()}`;
     });
   });
 
@@ -709,12 +734,45 @@ document.addEventListener("DOMContentLoaded", () => {
     renderFilteredResults();
   }
 
+  function splitResultsByTab() {
+    const matched = [];
+    const recommended = [];
+    searchResults.forEach((item) => {
+      if (item && item.match_category === "recommended") {
+        recommended.push(item);
+      } else {
+        matched.push(item);
+      }
+    });
+    return { matched, recommended };
+  }
+
+  function getJobsForActiveTab() {
+    const { matched, recommended } = splitResultsByTab();
+    return activeTab === "recommended" ? recommended : matched;
+  }
+
+  function updateTabHeader(matchedCount, recommendedCount) {
+    const hasResults = searchResults.length > 0;
+    if (resultsTabs) {
+      resultsTabs.style.display = hasResults ? "flex" : "none";
+    }
+    if (tabMatchedCount) tabMatchedCount.textContent = String(matchedCount);
+    if (tabRecommendedCount) tabRecommendedCount.textContent = String(recommendedCount);
+    tabButtons.forEach((btn) => {
+      const isActive = (btn.dataset.tab || "matched") === activeTab;
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+  }
+
   function renderFilteredResults() {
     const hasResults = searchResults.length > 0;
+    const { matched, recommended } = splitResultsByTab();
+    updateTabHeader(matched.length, recommended.length);
+
+    const tabJobs = activeTab === "recommended" ? recommended : matched;
     resultsToolbar.style.display = hasResults ? "flex" : "none";
-    exportButtons.forEach((btn) => {
-      btn.disabled = !hasResults;
-    });
 
     const rawQuickTerm = quickFilterInput.value.trim();
     const quickTerm = normalizeLookup(rawQuickTerm);
@@ -724,8 +782,8 @@ document.addEventListener("DOMContentLoaded", () => {
       : [];
 
     const filtered = !quickTerm && excludeTerms.length === 0
-      ? searchResults
-      : searchResults.filter((item) => {
+      ? tabJobs
+      : tabJobs.filter((item) => {
           const display = getDisplayJob(item);
           if (quickTerm) {
             const includeHaystack = normalizeLookup(
@@ -762,7 +820,11 @@ document.addEventListener("DOMContentLoaded", () => {
           return true;
         });
 
-    updateCounts(filtered.length, searchResults.length);
+    exportButtons.forEach((btn) => {
+      btn.disabled = filtered.length === 0;
+    });
+
+    updateCounts(filtered.length, tabJobs.length);
     resultsGrid.innerHTML = "";
 
     if (filtered.length === 0) {
@@ -770,18 +832,26 @@ document.addEventListener("DOMContentLoaded", () => {
       emptyState.style.display = "flex";
       const h3 = emptyState.querySelector("h3");
       const p = emptyState.querySelector("p");
-      if (hasResults && (quickTerm || excludeTerms.length > 0)) {
+      if (hasResults && tabJobs.length === 0) {
+        if (activeTab === "matched") {
+          h3.textContent = t("emptyTabMatchedTitle");
+          p.textContent = t("emptyTabMatchedDesc", { recommended: recommended.length });
+        } else {
+          h3.textContent = t("emptyTabRecommendedTitle");
+          p.textContent = t("emptyTabRecommendedDesc", { matched: matched.length });
+        }
+      } else if (hasResults && (quickTerm || excludeTerms.length > 0)) {
         h3.textContent = t("emptyNoMatchTitle");
         if (quickTerm && excludeTerms.length > 0) {
           p.textContent = t("emptyNoMatchCombinedDesc", {
             term: rawQuickTerm,
             excluded: rawExclude,
-            total: searchResults.length,
+            total: tabJobs.length,
           });
         } else if (quickTerm) {
-          p.textContent = t("emptyNoMatchDesc", { term: rawQuickTerm, total: searchResults.length });
+          p.textContent = t("emptyNoMatchDesc", { term: rawQuickTerm, total: tabJobs.length });
         } else {
-          p.textContent = t("emptyNoMatchExcludeDesc", { excluded: rawExclude, total: searchResults.length });
+          p.textContent = t("emptyNoMatchExcludeDesc", { excluded: rawExclude, total: tabJobs.length });
         }
       } else if (isSearching) {
         h3.textContent = t("emptyCollectingTitle");
@@ -1089,6 +1159,17 @@ document.addEventListener("DOMContentLoaded", () => {
     return key ? t(key) : raw;
   }
 
+  const WORK_MODE_CODE_KEYS = {
+    remote: "placeRemote",
+    hybrid: "placeHybrid",
+    onsite: "placeOnsite",
+  };
+
+  function translateWorkMode(job) {
+    const key = job && job.work_mode_code ? WORK_MODE_CODE_KEYS[job.work_mode_code] : null;
+    return key ? t(key) : "";
+  }
+
   function formatRelativeTime(rawTime) {
     if (!rawTime) return "";
     const normalized = String(rawTime).replace(/\u00a0/g, " ").trim();
@@ -1167,7 +1248,11 @@ document.addEventListener("DOMContentLoaded", () => {
     badges.className = "card-badges";
     const formattedTime = formatRelativeTime(job.time);
     const experienceLevel = translateExperienceLevel(job);
+    const workModeLabel = translateWorkMode(job);
     if (job.location) badges.appendChild(createMetaBadge("bi bi-geo-alt", job.location));
+    if (workModeLabel) {
+      badges.appendChild(createMetaBadge(job.work_mode_code === "onsite" ? "bi bi-building" : "bi bi-laptop", workModeLabel));
+    }
     if (formattedTime) badges.appendChild(createMetaBadge("bi bi-clock", formattedTime));
     if (experienceLevel) {
       badges.appendChild(createMetaBadge("bi bi-bar-chart", experienceLevel));
@@ -1218,7 +1303,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const formattedTime = formatRelativeTime(job.time);
     const experienceLevel = translateExperienceLevel(job);
     const employmentType = translateEmploymentType(job);
+    const workModeLabel = translateWorkMode(job);
     if (job.location) modalBadges.appendChild(createMetaBadge("bi bi-geo-alt", job.location));
+    if (workModeLabel) {
+      modalBadges.appendChild(createMetaBadge(job.work_mode_code === "onsite" ? "bi bi-building" : "bi bi-laptop", workModeLabel));
+    }
     if (formattedTime) modalBadges.appendChild(createMetaBadge("bi bi-clock", formattedTime));
     if (experienceLevel) {
       modalBadges.appendChild(createMetaBadge("bi bi-bar-chart", experienceLevel));
@@ -1272,8 +1361,11 @@ document.addEventListener("DOMContentLoaded", () => {
       progressBar.style.width = "0%";
       statusPercent.textContent = "0%";
       searchResults = [];
+      activeTab = "matched";
       currentPage = 1;
       resultsGrid.innerHTML = "";
+      if (resultsTabs) resultsTabs.style.display = "none";
+      updateTabHeader(0, 0);
       resultsToolbar.style.display = "none";
       paginationBar.style.display = "none";
       emptyState.style.display = "flex";
