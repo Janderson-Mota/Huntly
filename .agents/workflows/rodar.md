@@ -7,14 +7,15 @@ Execute o fluxo completo de forma autônoma, assumindo cada papel na ordem abaix
 
 ### BLOCO 1: DIAGNÓSTICO COMPLETO (Executar tudo agora e parar só no final deste bloco)
 1. Rode `python -m pytest -v` e registre a linha de base.
-2. Como **@auditor**: analise front, back (`app.py`, `scraper.py`), estado/banco (`state.py`), ache a causa raiz do filtro de país (Brasil trazendo outros países), outros bugs e liste o que pode ser apagado. Salve em `docs/analise/auditoria_fullstack.md`.
-3. Como **@frontend**: teste a responsividade em 360, 768, 1024 e 1440 px no navegador (com prints) e mapeie todos os textos fixos que não mudam de idioma. Salve em `docs/analise/visual_e_idiomas.md`.
-4. **PARE AQUI:** Apresente um resumo único com o plano de correção, a lista do que será apagado e as decisões pendentes. Aguarde o "Aprovado" do Jandin.
+2. **Servidor Local:** Verifique se a aplicação local (`app.py`) já está rodando (ex: porta 5000 ou 8000). Se não estiver, inicie o servidor local em segundo plano antes de abrir o navegador (e encerre o processo ao terminar os testes visuais).
+3. Como **@auditor**: analise front, back (`app.py`, `scraper.py`), estado/banco (`state.py`), ache a causa raiz do filtro de país (Brasil trazendo outros países), outros bugs e liste o que pode ser apagado. Salve em `docs/analise/auditoria_fullstack.md`.
+4. Como **@frontend**: acesse o servidor local no navegador, teste a responsividade em 360, 768, 1024 e 1440 px (com prints) e mapeie todos os textos fixos que não mudam de idioma. Salve em `docs/analise/visual_e_idiomas.md`.
+5. **PARE AQUI:** Apresente um resumo único com o plano de correção, a lista do que será apagado e as decisões pendentes. Aguarde o "Aprovado" do Jandin.
 
 ---
 
 ### BLOCO 2: EXECUÇÃO TOTAL (Executar tudo em sequência assim que o Jandin responder "Aprovado")
 1. Como **@engenheiro**: aplique todas as correções aprovadas (uma por vez, rodando `pytest` e fazendo um commit por correção na branch `melhorias`).
-2. Como **@revisor**: revise o `git diff master..melhorias`, crie testes em `tmp-tests/` provando o filtro do Brasil e os idiomas, rode todo o `pytest`, apague `tmp-tests/` e remova os arquivos/códigos mortos aprovados. Faça o commit de limpeza.
+2. Como **@revisor**: revise o `git diff master..melhorias`, crie testes em `tmp-tests/` provando o filtro do Brasil e os idiomas, suba o servidor local se necessário para validar visualmente as correções, rode todo o `pytest`, apague `tmp-tests/` e remova os arquivos/códigos mortos aprovados. Faça o commit de limpeza.
 3. Como **@documentador**: registre as decisões técnicas (ADRs) em `docs/decisoes/` e atualize o `README.md`. Faça o commit final de documentação.
 4. Entregue o resumo final pronto para deploy.
