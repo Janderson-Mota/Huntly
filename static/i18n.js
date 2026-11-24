@@ -90,7 +90,7 @@ window.HUNTLY_I18N = {
     ariaPagination: "Paginação de resultados",
     ariaCloseModal: "Fechar",
     ariaFooter: "Rodapé",
-    footerRights: "Buscador de vagas públicas · Sem vínculo com o LinkedIn",
+    footerRights: "Buscador de vagas públicas",
     ariaExperienceMulti: "Selecionar níveis de experiência",
     ariaWorkModeMulti: "Selecionar modalidades de trabalho",
     modalTitleFallback: "Título da Vaga",
